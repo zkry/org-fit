@@ -2,7 +2,7 @@
 
 ;; Author: Zachary Romero
 ;; Version: 0.1.0
-;; Package-Requires: ((emacs "26.1"))
+;; Package-Requires: ((emacs "29.1"))
 ;; Homepage: https://github.com/zkry/jackel
 ;; Keywords: tools
 
@@ -28,6 +28,7 @@
 ;;; Code:
 
 (require 'org-element)
+(require 'org-clock)
 (require 'seq)
 
 (defgroup jackel nil
@@ -62,9 +63,20 @@
      (.9 . 2)))
   "Default unit to log in if not specified.")
 
-(defcustom jackel-set-note-types
-  '("drop" "failure")
-  "List of predefined notations for sets.")
+
+;;; Variables and constants
+
+;; Properties
+
+(defconst jackel-autorest-property-name "JACKEL_AUTOREST"
+  "The name of the property which defines how long rest intervals should be.")
+(defconst jackel-exercise-type-property-name "JACKEL_EXERCISE_TYPE"
+  "The name of the property which defines how an exercise is to be recorded.
+It can be any of the following strings: \"weight+reps\", \"distance+time\", \"reps\", \"time\", or \"weight+time\".
+
+By default, exercises are assumed to be of the type `(weight reps)'.")
+
+;; System-heading related
 
 (defvar jackel-exercises-heading "Exercises"
   "Top-level heading for which the directory of exercises are located.")
@@ -74,6 +86,50 @@
 
 (defvar jackel-workouts-heading "Workouts"
   "Top-level heading for which the directory of workouts are located.")
+
+;; Table-related
+
+(defconst jackel-column-name-weight "weight"
+  "The column name for recording a weight.")
+(defconst jackel-column-name-reps "reps"
+  "The column name for recording a rep count.")
+(defconst jackel-column-name-distance "distance"
+  "The column name for recording a distance.")
+(defconst jackel-column-name-time "time"
+  "The column name for recording a time.")
+(defconst jackel-column-name-notes "notes"
+  "The column name for recording a time.")
+
+;; Workout-mode related
+
+(defvar jackel-workout-heading-marker nil
+  "Variable to stor the top-level heading position.
+For example, used to quickly find the item needed to clock in/out of.")
+
+(defvar-local jackel-fold-setting 'hide-other
+  "Stores the auto-folding preference for jackel-workout-mode.
+It can be either the symbols `hide-other' so on only the current
+set/superset is shown or all, to show all exercises.")
+;; TODO: add defcustom  of jackel-default-fold-setting, or document setting default value.
+
+(defvar jackel-insert-reference-point nil
+  "Variable storing the spot where input was last run.
+This is used to auto-clear fields when inputing a number.")
+
+(defvar jackel-workout-mode-timer nil
+  "Timer updating various UI of the current active session.")
+
+(defvar jackel-active-workout-name nil
+  "Variable to store the name of the current active routine.")
+
+(defvar jackel-workout-rest-time nil
+  "Cons of the float time when the rest timer started and the target rest time.
+If nil, the rest timer isn't active.")
+
+
+
+
+;;; Macro helpers:
 
 (defmacro jackel-with-log-file (&rest body)
   (declare (indent 0) (debug t))
@@ -87,9 +143,18 @@
      (insert-file-contents jackel-log-file)
      ,@body))
 
-(defun jackel--subheadings (elt)
+(defun jackel--org-element-contents (elt)
   (let ((elts))
-    (org-element-map (org-element-contents elt) 'headline
+    (org-element-map (org-element-parse-buffer) 'headline
+      (lambda (hl)
+        (when (equal (org-element-begin (org-element-parent hl)) (org-element-begin elt))
+          (push hl elts))))
+    (nreverse elts)))
+
+(defun jackel--subheadings (elt)
+  (let* ((contents (jackel--org-element-contents elt))
+         (elts))
+    (org-element-map contents 'headline
       (lambda (hl)
         (when (= (org-element-property :level hl) (1+ (org-element-property :level elt)))
           (push hl elts))))
@@ -140,48 +205,21 @@
          (selection (completing-read "Exercise: " completion-items nil t)))
     (alist-get selection completion-items nil nil #'equal)))
 
-(cl-defstruct (jackel-exercise-group
-               (:copier nil)
-               (:constructor jackel-exercise-group-create))
-  "Structure representing a group of exercises for the same movement."
-  exercise-element
-  exercise-units)
 
-(cl-defstruct (jackel-exercise-unit
-               (:copier nil)
-               (:constructor jackel-exercise-unit-create))
-  "Structure representing a unit of exercise, planned or actualized."
-  rep-count
-  set-type ; :drop :warmup
-  reps-in-reserve
-  weight)
+
+;;; Weight helper functions
 
-(defun jackel-parse-exercise-elt (exercise-elt)
-  "Parse EXERCISE-ELT, returning list of exercise units."
-  (jackel-with-log-file
-    (goto-char (point-min))
-    (narrow-to-region (org-element-property :contents-begin exercise-elt)
-                      (org-element-property :contents-end exercise-elt))
-
-    (let ((units))
-      (while (search-forward-regexp "\\([1-9]+\\)x\\([0-9]+\\)" nil t)
-        (let ((set-ct (string-to-number (match-string 1)))
-              (rep-ct (string-to-number (match-string 2)))
-              (line-str (thing-at-point 'line))
-              (weight))
-          (when (string-match "@\\([1-9][0-9]+\\)\\(kg\\|lbs?\\)?" line-str)
-            (let* ((weight-amt (string-to-number (match-string 1 line-str)))
-                   (unit (pcase (match-string 2 line-str)
-                           ("lb" :lb)
-                           ("lbs" :lb)
-                           ("kg" :kg))))
-              (setq weight (cons weight-amt unit))))
-          (dotimes (_ set-ct)
-                (push (jackel-exercise-unit-create
-                       :rep-count rep-ct
-                       :weight weight)
-                      units))))
-      (nreverse units))))
+(defun jackel--parse-weight (str)
+  (when (string-match "[0-9]+" str)
+    (let* ((number (string-to-number (match-string 0 str)))
+           (unit (and (string-match (regexp-opt '("kg" "lb" "lb")) str)
+                      (match-string 0 str))))
+      (if unit
+          (cons number
+                (pcase unit
+                  ("kg" :kg)
+                  ("lb" :lb)))
+        (cons number jackel-default-unit)))))
 
 (defun jackel--read-weight (&optional prompt)
   "Prompt the user to input a weight.
@@ -203,6 +241,15 @@ If PROMPT is a string use that as the prompt."
       ((cl-type null) "")
       (amt
        (format "%s%s" (funcall clean-float-func amt) (alist-get jackel-default-unit unit-to-string))))))
+
+(defun jackel--value-to-string (val)
+  "Return a string representing VAL.
+Value can be a united number or a plain number."
+  (cond
+   ((numberp val) (format "%s" val))
+   ((consp val)
+    ;; TODO - this will need to change when durations and time are added.
+    (jackel--weight-to-string val))))
 
 (defun jackel--round-to-nearest (weight nearest)
   "Round WEIGHT to the closest multiple of NEAREST."
@@ -228,43 +275,172 @@ If PROMPT is a string use that as the prompt."
     (pcase-let ((`(,weight . ,unit) a))
       (cons (* weight b) unit)))))
 
-(defun jackel--insert-workout (routine-elt)
-  "Insert EXERCISES into workout file."
-  (let* ((routine-exercise-elts (jackel--subheadings routine-elt))
-         (groups '())
-         workout-start)
-    (dolist (eelt routine-exercise-elts)
-      (let* ((exercise-elt (car (org-element-contents eelt)))
-             (exercises (and exercise-elt (jackel-parse-exercise-elt exercise-elt)))
-             (group (jackel-exercise-group-create
-                     :exercise-element eelt
-                     :exercise-units exercises)))
-        (push group groups)))
-    (setq groups (nreverse groups))
-    (let ((routine-name (org-element-property :raw-value routine-elt))
-          (exercise-hl (jackel--main-heading jackel-workouts-heading)))
-      (if (org-element-contents-begin exercise-hl)
-          (goto-char (org-element-contents-begin exercise-hl))
-        (goto-char (org-element-end exercise-hl)))
-      (setq workout-start (point))
-      (insert (format "** %s %s\n\n" routine-name (format-time-string "[%Y-%m-%d %a]")))
-      (dolist (group groups)
-        (let* ((eelt (jackel-exercise-group-exercise-element group))
-               (units (jackel-exercise-group-exercise-units group)))
-          (insert (format "*** %s\n" (org-element-property :raw-value eelt)))
-          (insert "| Reps | Weight | Note |\n")
-          (insert "|------+--------+------|\n")
-          (unless units
-            (insert "|      |        |      |\n"))
-          (dolist (unit units)
-            (let* ((rep (jackel-exercise-unit-rep-count unit))
-                   (weight (jackel-exercise-unit-weight unit)))
-              (insert (format "| %s | %s | %s |\n" rep "" (jackel--weight-to-string weight)))))
-          (save-excursion
-            (org-table-align))
-          (insert "\n"))))
-    (goto-char workout-start)
-    (org-element-at-point)))
+
+;;; Exercises
+
+(defun jackel--exercise-type (exercise-elt)
+  (let ((type-str (org-entry-get
+                   exercise-elt
+                   jackel-exercise-type-property-name)))
+    ;; "weight+reps\", \"distance+time\", \"reps\", \"time\", or \"weight+time\"
+    (pcase type-str
+      ("weight+reps" '(weight reps))
+      ("distance+time" '(distance time))
+      ("reps" '(reps))
+      ("time" '(time))
+      ("weight+time" '(weight time)))))
+
+
+;;; Routines
+
+(defun jackel--column-type-to-name (type)
+  "Return the column name of a given column TYPE."
+  (pcase type
+    ('weight jackel-column-name-weight)
+    ('reps jackel-column-name-reps)
+    ('distance jackel-column-name-distance)
+    ('time jackel-column-name-time)
+    ('notes jackel-column-name-notes)))
+
+(defun jackel--column-name-to-type (name)
+  "Return the column name of a given column TYPE."
+  (let ((name (downcase name)))
+    (cond
+     ((equal name jackel-column-name-weight) 'weight)
+     ((equal name jackel-column-name-reps) 'reps)
+     ((equal name jackel-column-name-distance) 'distance)
+     ((equal name jackel-column-name-time) 'time)
+     ((equal name jackel-column-name-notes) 'notes))))
+
+(defun jackel-insert-blank-table (col1 &optional col2)
+  "Insert empty table for recording exercises with COL1, COL2, and notes."
+  (let ((col1-name (jackel--column-type-to-name col1))
+        (col2-name (jackel--column-type-to-name col2))
+        (notes-name (jackel--column-type-to-name 'notes))
+        (goto-pt))
+    (if col2
+        (progn
+          (insert (format "| %s | %s | %s |\n" col1-name col2-name notes-name))
+          (insert (format "|-%s-|-%s-|-%s-|\n"
+                          (make-string (length col1-name) ?-)
+                          (make-string (length col2-name) ?-)
+                          (make-string (length notes-name) ?-)))
+          (insert "| ")
+          (setq goto-pt (point))
+          (insert (format "%s | %s | %s |\n"
+                          (make-string (length col1-name) ?\s)
+                          (make-string (length col2-name) ?\s)
+                          (make-string (length notes-name) ?\s))))
+      (insert (format "| %s | %s |\n" col1-name notes-name))
+      (insert (format "|-%s-|-%s-|\n"
+                      (make-string (length col1-name) ?-)
+                      (make-string (length notes-name) ?-)))
+      (insert "| ")
+      (setq goto-pt (point))
+      (insert (format "%s | %s |\n"
+                      (make-string (length col1-name) ?\s)
+                      (make-string (length notes-name) ?\s))))
+    (goto-char goto-pt)))
+
+
+;;; Interactive Commands (for routines):
+
+(defun jackel-insert-exercise (exercise-elt)
+  "Insert a known exercise headline after the current point."
+  (interactive
+   (list (jackel--completing-read-elements (jackel-exercise-elements))))
+  (let ((exercise-name (org-element-property :raw-value exercise-elt))
+        (exercise-type (jackel--exercise-type exercise-elt)))
+    (org-insert-heading-respect-content)
+    (insert exercise-name)
+    (insert "\n\n")
+    (apply #'jackel-insert-blank-table exercise-type)))
+
+
+;;; Workouts
+
+(defun jackel--make-note (val type)
+  (unless (string-blank-p val)
+    (pcase type
+      ('reps (format "x%s" val))
+      ('weight (jackel--weight-to-string (jackel--parse-weight val))))))
+
+(defun jackel--move-input-to-notes (routine-ex-elt)
+  "Move input columns of ROUTINE-EX-ELT into note column."
+  (let* ((start (org-element-property :contents-begin routine-ex-elt))
+         (end (org-element-property :contents-end routine-ex-elt)))
+    (save-restriction
+      (narrow-to-region start end)
+      (goto-char start)
+      (when (search-forward (concat "| " jackel-column-name-notes) nil t)
+        (org-table-analyze)
+        (let* ((line-ct (- (length org-table-dlines) 2))
+               (col-ct org-table-current-ncol)
+               (col1 (jackel--column-name-to-type (org-table-get 1 1)))
+               (col2 (jackel--column-name-to-type (org-table-get 1 2)))
+               (_col3 (jackel--column-name-to-type (org-table-get 1 3))))
+          (cl-loop for line from 2 to (1+ line-ct)
+                   do
+                   (if (= col-ct 2)
+                       (let* ((note (jackel--make-note (org-table-get line 1) col1))
+                              (old-note (org-table-get line 2))
+                              (new-note (if (string-blank-p old-note)
+                                            note
+                                          (concat note "; " old-note))))
+                         (org-table-put line 2 new-note)
+                         (org-table-put line 1 ""))
+                     (let* ((note1 (jackel--make-note (org-table-get line 1) col1))
+                            (note2 (jackel--make-note (org-table-get line 2) col2))
+                            (note (concat note1 " " note2))
+                            (old-note (org-table-get line 3))
+                            (new-note (if (string-blank-p old-note)
+                                          note
+                                        (concat note "; " old-note))))
+                       (org-table-put line 1 "")
+                       (org-table-put line 2 "")
+                       (org-table-put line 3 new-note)))))
+        (org-table-align)))))
+
+(defun jackel--setup-workout (routine-elt)
+  "Create a new routine from ROUTINE-ELT in the workout file."
+  (goto-char (org-element-begin routine-elt))
+  (org-copy-subtree)
+  (let* ((exercise-hl (jackel--main-heading jackel-workouts-heading))
+         (routine-name (org-element-property :raw-value routine-elt)))
+    (if (org-element-contents-begin exercise-hl)
+        (goto-char (org-element-contents-begin exercise-hl))
+      (goto-char (org-element-end exercise-hl)))
+    (org-paste-subtree)
+    (let ((workout-start (make-marker)))
+      (set-marker workout-start (point))
+      (org-set-property "JACKEL_WORKOUT_ROUTINE" routine-name)
+      (save-excursion
+        (goto-char (pos-eol))
+        (insert " " (format-time-string "[%Y-%m-%d %a]")))
+      (let* ((routine-elt (org-element-at-point))
+             (routine-exercises (jackel--subheadings routine-elt)))
+        (dolist (routine-exercise-elt (seq-reverse routine-exercises))
+          (jackel--move-input-to-notes routine-exercise-elt))))))
+
+(defun jackel--set-workout-to-active ()
+  "Find the workout of the point and make it active, enabling jackel-workout-mode."
+  ;; TODO: catch error and print nicer message
+  (catch 'done
+    (while t
+      (let ((at-elt (org-element-at-point)))
+        (when (and (eql (org-element-type at-elt) 'headline)
+                   (alist-get "JACKEL_WORKOUT_ROUTINE" (org-entry-properties) nil nil 'equal))
+          (message "Let's go!")
+          (throw 'done nil))
+        (org-up-element))))
+  (let* ((workout-name (alist-get "JACKEL_WORKOUT_ROUTINE" (org-entry-properties) nil nil 'equal))
+         (workout-marker (make-marker)))
+    (org-clock-in)
+    (set-marker workout-marker (point))
+    (setq jackel-workout-heading-marker workout-marker)
+    (org-narrow-to-subtree)
+    (setq jackel-active-workout-name workout-name)
+    (jackel-workout-mode 1)))
 
 (defvar jackel-workout-mode-map
   (let ((map (make-keymap)))
@@ -273,7 +449,6 @@ If PROMPT is a string use that as the prompt."
     ;; Movement and Viewing
     (keymap-set map "<tab>" #'jackel-workout-next-empty-field)
     (keymap-set map "<backtab>" #'jackel-workout-previous-empty-field)
-    (keymap-set map "." #'org-shifttab) ;; something more native?
 
     (keymap-set map "<up>" #'jackel-workout-up-field)
     (keymap-set map "<down>" #'jackel-workout-down-field)
@@ -297,28 +472,44 @@ If PROMPT is a string use that as the prompt."
     (keymap-set map "k" #'jackel-workout-remove-exercise)
     (keymap-set map "S" #'jackel-workout-swap-exercise)
     ;; (keymap-set map "i" #'jackel-workout-info-dwim)
+    (keymap-set map "v" #'jackel-workout-toggle-view)
 
     (keymap-set map "S-<up>" #'org-move-subtree-up)
     (keymap-set map "S-<down>" #'org-move-subtree-down)
 
     ;; Data Entry
-    (keymap-set map "\"" #'jackel-workout-ditto)
+    (keymap-set map "<space>" #'jackel-fill-in)
+    (keymap-set map "\"" #'jackel-workout-ditto) ;; something more native?
+
     (dotimes (i 10)
-      (keymap-set map (string (+ ?0 i)) #'self-insert-command))
+      (keymap-set map (string (+ ?0 i)) #'jackel-self-insert-command))
 
     ;; Session Management
     ; (keymap-set map "r" #'jackel-workout-pause-start-rest)
-    ; (keymap-set map "P" #'jackel-workout-pause-start-session)
+    (keymap-set map "P" #'jackel-workout-pause-start-session)
     ; (keymap-set map "Q" #'jackel-workout-quit)
 
     map)
   "Mode map for `jackel-workout-mode'")
 
-(defun jackel--table-column-name ()
+(defun jackel--table-current-column-type (&optional column)
   "Return the string of the first row of the current column."
-  (let ((current-column (org-table-current-column)))
+  (let ((current-column (or column(org-table-current-column))))
     (when (> current-column 0) ;; we are in a table
-      (org-table-get 1 current-column))))
+      (jackel--column-name-to-type (org-table-get 1 current-column)))))
+
+(defun jackel--line-note (&optional input-section)
+  "Return the note string for the current line.
+If INPUT-SECTION is non-nil, get the first semicolon delimited text."
+  ;; TODO: This could be done more stabily by checking for column names.
+  (let* ((current-line (org-table-current-line))
+         (col3-data (org-table-get current-line 3))
+         (res (if (not (string-blank-p col3-data))
+                  col3-data
+                (org-table-get current-line 2))))
+    (if input-section
+        (car (string-split res ";"))
+      res)))
 
 (defun jackel--on-set-line ()
   "Return non-nil if the point is on a line for inputing set data."
@@ -330,8 +521,7 @@ If PROMPT is a string use that as the prompt."
 If NOTE is a string, use that instead of getting the current line's cell."
   (when (and (not note) (not (jackel--on-set-line)))
     (error "No set on current line"))
-  (let* ((current-line (org-table-current-line))
-         (note-text (or note (org-table-get current-line 3))))
+  (let* ((note-text (or note (jackel--line-note t))))
     (cond
      ((string-match "\\([1-9][0-9]*\\(?:\\.[0-9]*\\)?\\)\\(kg\\|lb\\)" note-text)
       (let* ((weight (match-string 1 note-text))
@@ -341,124 +531,189 @@ If NOTE is a string, use that instead of getting the current line's cell."
          (intern (concat ":" unit)))))
 
      ;; unitless string at beginning of note
-     ((string-match "\\`\\([1-9][0-9]*\\(?:\\.[0-9]*\\)?\\)[^0-9]" note-text)
+     ((string-match "\\`\\([1-9][0-9]*\\(?:\\.[0-9]*\\)?\\)\\(?:[^0-9]\\|$\\)" note-text)
       (let* ((weight (match-string 1 note-text)))
         (cons (string-to-number weight) jackel-default-unit))))))
 
+(defun jackel--target-reps-of-set (&optional note)
+  "Return weight specification.
+If NOTE is a string, use that instead of getting the current line's cell."
+  (when (and (not note) (not (jackel--on-set-line)))
+    (error "No set on current line"))
+  (let* ((note-text (or note (jackel--line-note t))))
+    (cond
+     ((string-match "x\\([1-9][0-9]*\\)" note-text)
+      (let* ((reps (match-string 1 note-text)))
+        (string-to-number reps))))))
+
+;; TODO: time spec of MM:SS or HH:MM:SS or min s sec h hour second minute
+;; TODO: distance spec of mi, km, m, ft, cm, or in.
+(defun jackel--extract-table-from-note ()
+  ""
+  (let* ((maybe-reps (jackel--target-reps-of-set))
+         (maybe-weight (jackel--target-weight-of-set))
+         (res))
+    (when maybe-reps
+      (push (cons 'reps maybe-reps) res))
+    (when maybe-weight
+      (push (cons 'weight maybe-weight) res))
+    res))
+
 (defun jackel--insert-blank-exercise-table ()
   "Insert a blank exercise table."
+  ;; TODO: respect org indentation setting
   (insert "| Reps | Weight | Note |\n")
   (insert "|------+--------+------|\n")
   (insert "|      |        |      |\n"))
 
+(defun jackel--apply-fold-setting ()
+  (pcase jackel-fold-setting
+    ('all nil)
+    ('hide-other
+     (let* ((pos (point)))
+       (org-cycle-global 16)
+       (org-reveal)
+       (goto-char pos)))))
+
+(defmacro jackel--with-workout-fold-settings (&rest body)
+  (declare (debug t) (indent 0))
+  `(progn
+     (org-fold-show-all '(headings))
+     ,@body
+     (jackel--apply-fold-setting)
+     (org-table-align)))
+
+(defun jackel--input-column-types ()
+  "Return list of downcased column names that contain performance data."
+  (list 'time 'distance 'reps 'weight))
+
+(defun jackel--start-rest-timer (&optional target)
+  (setq jackel-workout-rest-time (cons (floor (float-time)) target)))
+
+(defun jackel--stop-rest-timer ()
+  "Clear rest timer, stopping it."
+  (setq jackel-workout-rest-time nil))
+
+
+;; Workout commands:
+
 (defun jackel-workout-next-empty-field ()
   "Move the point to the next empty field in a workout session."
   (interactive)
-  (let ((starting-point (point))
-        (next-field-column-names '("Reps" "Weight"))) ;; TODO: Make this a defcustom
-    (catch 'done
-     (while t
-       (let ((next-field-exists (search-forward-regexp "|\\( \\) *|" nil t)))
-         (unless next-field-exists
-           (throw 'done nil))
-         (if next-field-exists
-             (progn
-               (goto-char (match-end 1))
-               (when (member (jackel--table-column-name) next-field-column-names)
-                 (throw 'done (point))))
-           (beep)
-           (goto-char starting-point)
-           (throw 'done (point))))))))
+  (jackel--with-workout-fold-settings
+   (let ((starting-point (point))
+         (next-field-column-names (jackel--input-column-types)))
+     (catch 'done
+       (while t
+         (let ((next-field-exists (search-forward-regexp "|\\( \\) *|" nil t)))
+           (unless next-field-exists
+             (throw 'done nil))
+           (if next-field-exists
+               (progn
+                 (goto-char (match-end 1))
+                 (when (member (jackel--table-current-column-type) next-field-column-names)
+                   (throw 'done (point))))
+             (beep)
+             (goto-char starting-point)
+             (throw 'done (point)))))))))
 
 (defun jackel-workout-previous-empty-field ()
   "Move the point to the previous empty field in a workout session."
   (interactive)
-  (let ((starting-point (point))
-        (next-field-column-names '("Reps" "Weight"))) ;; TODO: Make this a defcustom
-    (catch 'done
-     (while t
-       (let ((next-field-exists (search-backward-regexp "|\\( \\) *|")))
-         (if next-field-exists
-             (progn
-               (goto-char (match-end 1))
-               (when (member (jackel--table-column-name) next-field-column-names)
-                 (throw 'done nil)))
-           (beep)
-           (goto-char starting-point)
-           (throw 'done nil)))))))
+  (jackel--with-workout-fold-settings
+   (let ((starting-point (point))
+         (next-field-column-names (jackel--input-column-types)))
+     (catch 'done
+       (while t
+         (let ((next-field-exists (search-backward-regexp "|\\( \\) *|" nil t)))
+           (if next-field-exists
+               (progn
+                 (goto-char (match-end 1))
+                 (when (member (jackel--table-current-column-type) next-field-column-names)
+                   (throw 'done nil)))
+             (beep)
+             (goto-char starting-point)
+             (throw 'done nil))))))))
 
 (defun jackel-workout-up-field ()
   "Move the next field above the current one."
   (interactive)
-  (let ((current-column (org-table-current-column)))
-    (if (= current-column 0)
-        (beep)
-      (let ((current-line (org-table-current-line)))
-        (if (> current-line 2)
-            (progn
-              (org-table-goto-line (1- current-line))
-              (org-table-goto-column current-column))
-          ;; Go to previous table's last entry
-          (let ((start (point)))
+  (jackel--with-workout-fold-settings
+    (let ((case-fold-search t)
+          (current-column (org-table-current-column)))
+      (if (= current-column 0)
+          (beep)
+        (let ((current-line (org-table-current-line)))
+          (if (> current-line 2)
+              (progn
+                (org-table-goto-line (1- current-line))
+                (org-table-goto-column current-column))
+            ;; Go to previous table's last entry
             (org-fold-show-all)
             (org-table-goto-line 1)
             (forward-line -1)
-            (search-backward-regexp (concat "| " " *" "Reps"  " *" " |"))
-            (org-table-goto-line 9999)
-            (org-table-goto-column current-column)))))))
+            (when (search-backward-regexp (concat "| " " *" "notes"  " *" " |") nil t)
+              (org-table-goto-line 9999)
+              (org-table-goto-column current-column))))))))
 
 (defun jackel-workout-down-field ()
   "Move the next field below the current one."
   (interactive)
-  (let ((current-column (org-table-current-column)))
-    (if (= current-column 0)
-        (beep)
-      (let ((current-line (org-table-current-line)))
-        (org-table-goto-line (1+ current-line))
-        (org-table-goto-column current-column)
-        (when (= (org-table-current-line) current-line)
-          (search-forward-regexp (concat "| " " *" "Reps"  " *" " |"))
-          (org-table-goto-line 2)
-          (org-table-goto-column current-column))))))
+  (jackel--with-workout-fold-settings
+    (let ((case-fold-search t)
+          (current-column (org-table-current-column)))
+      (if (= current-column 0)
+          (beep)
+        (let ((current-line (org-table-current-line)))
+          (org-table-goto-line (1+ current-line))
+          (org-table-goto-column current-column)
+          (when (= (org-table-current-line) current-line)
+            (when (search-forward-regexp (concat "| " " *" "notes"  " *" " |") nil t))
+            (org-table-goto-line 2)
+            (org-table-goto-column current-column)))))))
 
 (defun jackel-workout-right-field ()
   "Move the next field below the current one."
   (interactive)
-  (let ((last-line (save-excursion
-                     (goto-char (- (org-table-end) 2))
-                     (org-table-current-line)))
-        (last-col (save-excursion
-                    (goto-char (- (org-table-end) 2))
-                    (org-table-current-column)))
-        (current-line (org-table-current-line))
-        (current-column (org-table-current-column)))
-    (if (and (= last-line current-line)
-             (= last-col current-column))
-        (progn
-          (search-forward-regexp (concat "| " " *" "Reps"  " *" " |"))
-          (org-table-goto-line 2)
-          (org-table-goto-column 1))
-      (org-table-next-field))))
+  (jackel--with-workout-fold-settings
+    (let ((case-fold-search t)
+          (last-line (save-excursion
+                       (goto-char (- (org-table-end) 2))
+                       (org-table-current-line)))
+          (last-col (save-excursion
+                      (goto-char (- (org-table-end) 2))
+                      (org-table-current-column)))
+          (current-line (org-table-current-line))
+          (current-column (org-table-current-column)))
+      (if (and (= last-line current-line)
+               (= last-col current-column))
+          (progn
+            (search-forward-regexp (concat "| " " *" "notes"  " *" " |"))
+            (org-table-goto-line 2)
+            (org-table-goto-column 1))
+        (org-table-next-field)))))
 
 (defun jackel-workout-left-field ()
   "Move the next field below the current one."
   (interactive)
-  (let ((current-line (org-table-current-line))
-        (current-column (org-table-current-column)))
-    (if (and (<= current-line 2)
-             (= current-column 1))
-        (progn
-          (goto-char (org-table-begin))
-          (search-backward-regexp (concat "| " " *" "Reps"  " *" " |"))
-          (let ((last-line (save-excursion
-                             (goto-char (- (org-table-end) 2))
-                             (org-table-current-line)))
-                (last-col (save-excursion
-                            (goto-char (- (org-table-end) 2))
-                            (org-table-current-column))))
-            (org-table-goto-line last-line)
-            (org-table-goto-column last-col)))
-      (org-table-previous-field))))
+  (jackel--with-workout-fold-settings
+    (let ((case-fold-search t)
+          (current-line (org-table-current-line))
+          (current-column (org-table-current-column)))
+      (if (and (<= current-line 2)
+               (= current-column 1))
+          (progn
+            (goto-char (org-table-begin))
+            (search-backward-regexp (concat "| " " *" "notes"  " *" " |"))
+            (let ((last-line (save-excursion
+                               (goto-char (- (org-table-end) 2))
+                               (org-table-current-line)))
+                  (last-col (save-excursion
+                              (goto-char (- (org-table-end) 2))
+                              (org-table-current-column))))
+              (org-table-goto-line last-line)
+              (org-table-goto-column last-col)))
+        (org-table-previous-field)))))
 
 (defun jackel-workout-add-set ()
   "Add a set to the current routine."
@@ -489,7 +744,7 @@ If NOTE is a string, use that instead of getting the current line's cell."
   (let* ((warmup-count 1)
          (set-target-weight))
     (let ((line 2))
-      (while-let ((note (org-table-get line 3)))
+      (while-let ((note (org-table-get line 3))) ;; TODO: needs to be dynamic
         (if (string-match-p "warmup" note)
             (cl-incf warmup-count)
           (when (not set-target-weight)
@@ -521,11 +776,10 @@ If NOTE is a string, use that instead of getting the current line's cell."
                            "warmup")
                          t))))))
 
-(defun jackel-workout-note-set ()
+(defun jackel-workout-note-set (note)
   "Note the current set as a special type."
-  (interactive)
-  (let* ((type (completing-read "Note: " jackel-set-note-types)))
-    (jackel-workout-add-note type)))
+  (interactive "sNote: ")
+  (jackel-workout-add-note note))
 
 (defun jackel-workout-add-exercise (exercise-elt)
   "Add an exercise to the current routine."
@@ -553,6 +807,60 @@ If NOTE is a string, use that instead of getting the current line's cell."
   (forward-line -1)
   (jackel-workout-add-exercise exercise))
 
+(defun jackel-workout-toggle-view ()
+  "Toggle view mode from viewing current set to viewing all."
+  (interactive)
+  (if (eql jackel-fold-setting 'all)
+      (progn
+        (setq jackel-fold-setting 'hide-other)
+        (message "View set to hiding other exercises."))
+    (setq jackel-fold-setting 'all)
+    (message "View set to showing all."))
+  (org-fold-show-all '(headings))
+  (jackel--apply-fold-setting))
+
+(defun jackel-fill-in ()
+  "Fill in the current cell according to note."
+  (interactive)
+  (let* ((note-data (jackel--extract-table-from-note))
+         (cell-value (org-table-get (org-table-current-line) (org-table-current-column)))
+         (column-type (jackel--table-current-column-type))
+         (two-input-table-p (equal (jackel--table-current-column-type 3) 'notes))
+         (col1-val (org-table-get (org-table-current-line) 1))
+         (col2-val (org-table-get (org-table-current-line) 2)))
+    (cond
+     ((and (not (alist-get column-type note-data)) two-input-table-p)
+      (let* ((other-col (if (= (org-table-current-column) 1) 2 1))
+             (other-col-type (jackel--table-current-column-type other-col))
+             (other-col-current-val (org-table-get (org-table-current-line) other-col))
+             (other-col-val (jackel--value-to-string (alist-get other-col-type note-data))))
+        (if (and other-col-val (string-blank-p other-col-current-val))
+            (org-table-put (org-table-current-line) other-col other-col-val)
+          (org-table-put (org-table-current-line) other-col ""))))
+     ((not (alist-get column-type note-data))
+      (beep))
+     ((string-blank-p cell-value)
+      (let ((note-val (jackel--value-to-string (alist-get column-type note-data))))
+        (org-table-put (org-table-current-line) (org-table-current-column) note-val))
+      (when (not two-input-table-p)
+        (jackel--start-rest-timer)))
+     ((not two-input-table-p)
+      (org-table-put (org-table-current-line) (org-table-current-column) ""))
+     ((string-blank-p col1-val)
+      (let ((note-val (jackel--value-to-string
+                       (alist-get (jackel--table-current-column-type 1) note-data))))
+        (org-table-put (org-table-current-line) 1 note-val))
+      (jackel--start-rest-timer))
+     ((string-blank-p col2-val)
+      (let ((note-val (jackel--value-to-string
+                       (alist-get (jackel--table-current-column-type 2) note-data))))
+        (org-table-put (org-table-current-line) 2 note-val))
+      (jackel--start-rest-timer))
+     (t
+      (org-table-put (org-table-current-line) 1 "")
+      (org-table-put (org-table-current-line) 2 "")))
+    (org-table-align)))
+
 (defun jackel-workout-ditto ()
   "Copy the value of the cell above for the current cell."
   (interactive)
@@ -565,21 +873,102 @@ If NOTE is a string, use that instead of getting the current line's cell."
       (let* ((up-val (org-table-get (1- current-line) current-column)))
         (org-table-put current-line current-column up-val t)))))
 
+
+
+(defun jackel--insert-reference-point ()
+  (save-excursion
+    (while (and (not (bolp))
+                (not (looking-at-p "|")))
+      (forward-char -1))
+    (point)))
+
+(defun jackel-self-insert-command ()
+  (interactive)
+  (let ((ref-point (jackel--insert-reference-point)))
+    (when (not (equal jackel-insert-reference-point ref-point))
+      (org-table-blank-field)
+      (setq jackel-insert-reference-point ref-point))
+    (call-interactively #'org-self-insert-command)))
+
+(defun jackel--header-line ()
+  "Return the header-line string for current session.
+It is expected that this function runs once a second."
+  (let* ((clock-time (org-clock-get-clocked-time))
+         (clock-hours (/ clock-time 60))
+         (clock-minutes (mod clock-time 60))
+         (seconds (mod (org-time-convert-to-integer
+		                (time-since org-clock-start-time))
+                       60))
+         (workout-time)
+         (rest-time ""))
+    (if (and org-clock-current-task
+             (string-match-p (regexp-quote jackel-active-workout-name)
+                             org-clock-heading))
+        (setq workout-time (if (> clock-hours 0)
+                               (format "%02d:%02d:%02d" clock-hours clock-minutes seconds)
+                             (format "%02d:%02d" clock-minutes seconds)))
+      (setq workout-time "PAUSED"))
+    (when jackel-workout-rest-time
+      (pcase-let* ((`(,rest-start . ,rest-target) jackel-workout-rest-time)
+                   (seconds-passed (- (floor (float-time)) rest-start)))
+        (if rest-target
+            (let* ((bar-width 20)
+                   (completed-percentage (/ (float seconds-passed) rest-target))
+                   (fill-bar-ct (min (floor (* completed-percentage bar-width)) bar-width))
+                   (blank-bar-ct (- bar-width fill-bar-ct))
+                   (fill-str (make-string fill-bar-ct ?#))
+                   (blank-str (make-string blank-bar-ct ?\s)))
+              (when (> completed-percentage 1.0)
+                (when (= (mod seconds-passed 2) 0)
+                  (setq fill-str (propertize fill-str 'face 'error))))
+              (setq rest-time (format "[%s%s] %ds/%ds" fill-str blank-str seconds-passed rest-target)))
+          (let* ((mins (/ seconds-passed 60))
+                 (secs (mod seconds-passed 60)))
+            (if (> mins 0)
+                (setq rest-time (format "REST: %d:%02d" mins secs))
+              (setq rest-time (format "REST: %ds" secs)))))))
+    (format "%s   %s   %s"
+            jackel-active-workout-name
+            workout-time
+            rest-time)))
+
+(defun jackel-workout-update-handler ()
+  (setq-local header-line-format (jackel--header-line)))
+
 (define-minor-mode jackel-workout-mode
   "Toggle `jackel-workout-mode'.
 `jackel-workout-mode' provides an easy way to input workout data
-by adding certain keybindings and automatically tracking certain changes.")
+by adding certain keybindings and automatically tracking certain changes."
+  :global nil
+  (when (timerp jackel-workout-mode-timer)
+    (cancel-timer jackel-workout-mode-timer))
+  (if (not jackel-workout-mode)
+      (progn
+        (setq header-line-format nil))
+    (setq header-line-format (or jackel-active-workout-name ""))
+    (setq jackel-workout-mode-timer (run-at-time nil 0.5 #'jackel-workout-update-handler))))
 
-(defun jackel-start-workout (routine-elt)
+(defun jackel-new-workout (routine-elt)
   "Create a new workout set for selected routine."
   (interactive
    (list (jackel--completing-read-elements (jackel-routine-elements))))
   (find-file jackel-log-file)
   (widen)
-  (let ((workout-heading-elt (jackel--insert-workout routine-elt)))
-    (goto-char (org-element-property :contents-begin workout-heading-elt))
-    (forward-line -1)
-    (org-narrow-to-subtree)))
+  (let ((workout-heading-elt (jackel--setup-workout routine-elt)))
+    ))
+
+(defun jackel-start-workout ()
+  "Start or continue the workout at the current point."
+  (interactive)
+  (jackel--set-workout-to-active))
+
+(defun jackel-workout-pause-start-session ()
+  (interactive)
+  (if org-clock-current-task
+      (org-clock-out)
+    (save-excursion
+      (goto-char jackel-workout-heading-marker)
+      (org-clock-in))))
 
 ;;; Exercise Display
 
