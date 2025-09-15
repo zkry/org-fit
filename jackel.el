@@ -62,6 +62,11 @@
   :type
   '(repeat (repeat (cons float natnum))))
 
+(defcustom jackel-1rm-function #'jackel--1rm-brzycki
+  "Default 1rm calculationf function to use.
+This should be a function that takes two arguments, a weight and rep count."
+  :type 'function)
+
 
 ;;; Variables and constants
 
@@ -371,7 +376,7 @@ Recognized properties are:
 
 (defun jackel--parse-weight (str)
   "Parse a weight string STR into a cons cell of (AMOUNT . UNIT)."
-  (when (string-match "[0-9]+" str)
+  (when (string-match "[0-9]+\\(\\.[0-9]+\\)?" str)
     (let* ((number (string-to-number (match-string 0 str)))
            (unit (and (string-match (regexp-opt '("kg" "lb" "lb")) str)
                       (match-string 0 str))))
@@ -382,6 +387,13 @@ Recognized properties are:
                   ("lb" :lb)))
         (cons number jackel-default-unit)))))
 
+(defun jackel--parse (str type)
+  (pcase type
+    ('reps (string-to-number str))
+    ('weight (jackel--parse-weight str))
+    ('time (jackel--parse-duration str))
+    ('distance (error "Not implemented"))))
+
 (defun jackel--read-weight (&optional prompt)
   "Prompt the user to input a weight.
 If PROMPT is a string use that as the prompt."
@@ -391,9 +403,9 @@ If PROMPT is a string use that as the prompt."
 (defun jackel--weight-to-string (weight)
   "Return a string representing WEIGHT."
   (let*  ((clean-float-func (lambda (x)
-                              (if (and (floatp x) (= (mod x 1) 0))
+                              (if (or (integerp x) (and (floatp x) (= (mod x 1) 0)))
                                   (floor x)
-                                x)))
+                                (format "%0.1f" x))))
           (unit-to-string '((:kg . "kg")
                             (:lb . "lb"))))
     (pcase weight
@@ -423,19 +435,47 @@ Value can be a united number or a plain number."
    ((numberp weight)
     (* (round (/ weight nearest) ) nearest))))
 
-(defun jackel--weight* (a b)
+(defun jackel--* (a b)
   "Multiply a weight A by a scalar amount B.
 Arguments may be reversed."
   (cond
    ((and (consp a) (consp b))
-    (error "Can't multiply two weights together"))
+    (pcase-let ((`(,scalar1 . ,unit1) a)
+                (`(,scalar2 . ,unit2) b))
+      (cons (* scalar1 scalar2) `(* ,unit1 ,unit2))))
    ((consp b)
-    (jackel--weight* b a))
+    (jackel--* b a))
    ((and (numberp a) (numberp b))
     (* a b))
    (t
     (pcase-let ((`(,weight . ,unit) a))
       (cons (* weight b) unit)))))
+
+(defun jackel--reduce (op &rest items)
+  "Multiply a weight A by a scalar amount B.
+Arguments may be reversed."
+  (seq-reduce
+   (lambda (acc elt)
+     (cond
+      ((and (consp acc) (consp elt))
+       (unless (equal (cdr acc) (cdr elt))
+         (error "enable to add values of two different types"))
+       (cons (funcall op (car acc) (car elt)) (cdr acc)))
+      ((or (consp elt) (consp acc))
+       (error "enable to add values of two different types"))
+      (t (funcall + acc elt))))
+   (cdr items)
+   (car items)))
+
+(defun jackel--+ (&rest items)
+  "Multiply a weight A by a scalar amount B.
+Arguments may be reversed."
+  (apply #'jackel--reduce (append '(+) items)))
+
+(defun jackel--max (&rest items)
+  "Multiply a weight A by a scalar amount B.
+Arguments may be reversed."
+  (apply #'jackel--reduce (append '(max) items)))
 
 
 ;;; Exercises
@@ -500,6 +540,90 @@ Arguments may be reversed."
   "Insert a known exercise EXERCISE-NAME after the current point."
   (interactive (list (jackel-read-exercise)))
   (jackel-workout-add-exercise exercise-name))
+
+
+
+
+;;; Summaries and Statistics
+
+;; The most popular formula is the formula from Matt Brzycki, which is weight divided by ( 1.0278 – 0.0278 × reps ).
+
+;; Epley’s formula is the weight multiplied by (1 + 0.0333 × reps).
+
+;; Lander’s formula is (100 × weight ) / (101.3 – 2.67123 × reps).
+
+;; Lombardi’s formula is weight × reps ^ 0.1.
+
+(defun jackel--table-volume ()
+  "Calculate the volume of the current table."
+  (let ((col1 (jackel--column-name-to-type (org-table-get 1 1)))
+        (col2 (jackel--column-name-to-type (org-table-get 1 2)))
+        (data (org-table-to-lisp)))
+    (apply
+     #'jackel--+
+     (seq-map
+      (lambda (row)
+        (let ((vals (butlast row 1)))
+          (if (= (length vals) 1)
+              (jackel--parse (car vals) col1)
+            (jackel--* (jackel--parse (car vals) col1)
+                       (jackel--parse (cadr vals) col2)))))
+      (seq-drop data 2)))))
+
+(defun jackel--table-1rm ()
+  "Calculate the best 1RM in current table."
+  (let ((col1 (jackel--column-name-to-type (org-table-get 1 1)))
+        (col2 (jackel--column-name-to-type (org-table-get 1 2)))
+        (data (org-table-to-lisp)))
+    (apply
+     #'jackel--max
+     (seq-map
+      (lambda (row)
+        (let ((vals (butlast row 1)))
+          (cond
+           ((= (length vals) 1)
+            nil)
+           ((and (eql col1 'weight)
+                 (eql col2 'reps))
+            (funcall jackel-1rm-function
+                     (jackel--parse (car vals) col1)
+                     (jackel--parse (cadr vals) col2)))
+           ((and (eql col1 'reps)
+                 (eql col2 'weight))
+            (funcall jackel-1rm-function
+                     (jackel--parse (cadr vals) col2)
+                     (jackel--parse (car vals) col1)))
+           (t nil))))
+      (seq-drop data 2)))))
+
+(defun jackel--table-best-set-volume ()
+  "Calculate the best 1RM in current table."
+  (let ((col1 (jackel--column-name-to-type (org-table-get 1 1)))
+        (col2 (jackel--column-name-to-type (org-table-get 1 2)))
+        (data (org-table-to-lisp)))
+    (apply
+     #'jackel--max
+     (seq-map
+      (lambda (row)
+        (let ((vals (butlast row 1)))
+          (if (= (length vals) 1)
+              (jackel--parse (car vals) col1)
+            (jackel--* (jackel--parse (car vals) col1)
+                       (jackel--parse (cadr vals) col2)))))
+      (seq-drop data 2)))))
+
+(defun jackel--1rm-brzycki (weight reps)
+  (jackel--* weight (/ 1.0 (- 1.0278 (* 0.0278 reps)))))
+
+(defun jackel--1rm-epley (weight reps)
+  (if (= 1 reps)
+      weight
+    (jackel--* weight (+ 1.0 (/ reps 30.0)))))
+
+(defun jackel--1rm-lander (weight reps)
+  (jackel--* (jackel--* 100 weight)
+             (/ 1.0 (- 101.3 (* 2.67123 reps)))))
+
 
 
 ;;; Workouts
@@ -664,6 +788,7 @@ by the command `jackel-fill-in'."
 
     ;; Data Entry
     (keymap-set map "<spc>" #'jackel-fill-in)
+    (keymap-set map "<SPC>" #'jackel-fill-in)
     (keymap-set map "\"" #'jackel-workout-ditto) ;; something more native?
     (keymap-set map "<volume-down>" #'jackel-fill-in-and-next-empty-field)
     (keymap-set map "<volume-up>" #'jackel-edit-and-next-empty-field)
@@ -692,8 +817,9 @@ If COLUMN is a number, use it instead of the current column."
 If INPUT-SECTION is non-nil, get the first semicolon delimited text."
   ;; TODO: This could be done more stabily by checking for column names.
   (let* ((current-line (org-table-current-line))
+         (two-input-table-p (equal (jackel--table-current-column-type 3) 'notes))
          (col3-data (org-table-get current-line 3))
-         (res (if (not (string-blank-p col3-data))
+         (res (if two-input-table-p
                   col3-data
                 (org-table-get current-line 2))))
     (if input-section
@@ -1089,7 +1215,7 @@ SECONDS after now."
       (dotimes (i warmup-count)
         (pcase-let* ((`(,percent . ,reps) (nth i warmup-routine))
                      (line (+ 2 i))
-                     (warmup-set-weight (and percent (jackel--weight* set-target-weight percent))))
+                     (warmup-set-weight (and percent (jackel--* set-target-weight percent))))
           (if reps
               (org-table-put line 1 (number-to-string reps))
             (org-table-put line 1 ""))
@@ -1126,16 +1252,18 @@ SECONDS after now."
   (unless (jackel-workout-next-empty-field)
     (jackel-workout-previous-empty-field)))
 
-(defun jackel-workout-swap-exercise (exercise-name)
+(defun jackel-workout-swap-exercise (exercise-name arg)
   "Replace current exercise with a different exercise named EXERCISE-NAME."
-  (interactive (list (jackel-read-exercise)))
-  (jackel--with-workout-fold-settings
-    (let ((m (make-marker)))
-      (set-marker m (point))
-      (jackel-workout-remove-exercise)
-      (goto-char m)
-      (forward-line -1)
-      (jackel-workout-add-exercise exercise-name))))
+  (interactive (list (jackel-read-exercise) (prefix-numeric-value current-prefix-arg)))
+  (if (= arg 4)
+      (jackel--with-workout-fold-settings
+        (let ((m (make-marker)))
+          (set-marker m (point))
+          (jackel-workout-remove-exercise)
+          (goto-char m)
+          (forward-line -1)
+          (jackel-workout-add-exercise exercise-name)))
+    (org-edit-headline exercise-name)))
 
 (defun jackel-workout-toggle-view ()
   "Toggle view mode from viewing current set to viewing all."
@@ -1241,9 +1369,13 @@ SECONDS after now."
 
 (defun jackel-workout-rest (arg)
   "Start rest if not started.  Otherwise add 15 seconds to rest.
-With a prefix ARG, rerun the rest timer at current point from the start."
+With a prefix ARG, rerun the rest timer at current point from the start.
+With two prefix args, prompt the user for a custom time to run."
   (interactive "p")
   (cond
+   ((= arg 16)
+    (let* ((secs (read-number "Rest seconds: ")))
+     (jackel--start-rest-timer secs)))
    ((= arg 4)
     (let* ((rest-str (org-entry-get (point) jackel-autorest-property-name)))
      (jackel--start-rest-timer (when rest-str (jackel--parse-duration rest-str)))))
@@ -1299,6 +1431,27 @@ different field."
       (setq jackel-insert-reference-point ref-point)
       (setq jackel-workout-new-data-entered t))
     (call-interactively #'org-self-insert-command)))
+
+(defvar jackel-exercise-statistics-overlay nil
+  "Variable to store exercise statistics overlay.
+This overlay is normally placed at the end of an exercie's table.")
+
+(defun jackel--put-exercise-statistics-overlay ()
+  "Put exercise statistics overlay for the current exercise."
+  (when (overlayp jackel-exercise-statistics-overlay)
+    (delete-overlay jackel-exercise-statistics-overlay)
+    (setq jackel-exercise-statistics-overlay nil))
+  (when (org-at-table-p)
+    (let* ((volume (jackel--table-volume))
+           (1rm (jackel--table-1rm))
+           (best-set-volume (jackel--table-best-set-volume))
+           (ov (make-overlay (1- (org-table-end)) (1- (org-table-end)))))
+      (overlay-put ov 'after-string
+                   (format "\nBest 1RM: %s\nTotal Volume: %s\nBest set volume: %s\n"
+                           (jackel--value-to-string 1rm)
+                           (jackel--value-to-string volume)
+                           (jackel--value-to-string best-set-volume)))
+      (setq jackel-exercise-statistics-overlay ov))))
 
 (defun jackel--header-line ()
   "Return the header-line string for current session.
@@ -1381,7 +1534,9 @@ Responsible for updating `header-line-format'."
                 (cdr jackel-workout-rest-time)
                 t)))
   (when jackel-workout-mode
-    (setq-local header-line-format (jackel--header-line))))
+    (setq-local header-line-format (jackel--header-line))
+    (jackel--put-exercise-statistics-overlay)))
+
 
 (define-minor-mode jackel-workout-mode
   "Toggle `jackel-workout-mode'.
@@ -1394,6 +1549,9 @@ by adding certain keybindings and automatically tracking certain changes."
       (progn
         (setq header-line-format nil))
     (setq header-line-format (or jackel-active-workout-name ""))
+    (setq-local org-log-done nil)
+    (setq-local org-log-into-drawer nil)
+    (setq-local org-todo-log-states nil)
     (setq jackel-workout-mode-timer (run-at-time nil 0.5 #'jackel-workout-update-handler))
     (when (fboundp 'set-text-conversion-style)
       (set-text-conversion-style nil))))
