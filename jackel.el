@@ -31,6 +31,7 @@
 (require 'org-element)
 (require 'org-clock)
 (require 'org-capture)
+
 (require 'seq)
 
 (defgroup jackel nil
@@ -477,6 +478,16 @@ Arguments may be reversed."
 Arguments may be reversed."
   (apply #'jackel--reduce (append '(max) items)))
 
+(defun jackel--move-up-to-workout ()
+  "Move the point up to the top-level definition of a workout."
+  (catch 'done
+    (while t
+      (let ((at-elt (org-element-at-point)))
+        (when (and (eql (org-element-type at-elt) 'headline)
+                   (alist-get "JACKEL_WORKOUT_ROUTINE" (org-entry-properties) nil nil 'equal))
+          (throw 'done nil))
+        (org-up-element)))))
+
 
 ;;; Exercises
 
@@ -542,6 +553,55 @@ Arguments may be reversed."
   (jackel-workout-add-exercise exercise-name))
 
 
+
+;;; History
+
+
+(defun jackel--workout-files ()
+  "Return list of files which contain workouts."
+  (let ((files))
+    (pcase-dolist (`(,_desc (,type ,f . ,_rest)) jackel-workout-capture-templates)
+      (when (member type '(file file+headline file+olp))
+        (push f files)))
+    (nreverse files)))
+
+(defun jackel--scan-past-workout-exercises (exercise-name)
+  "Scan all workouts for exercises of EXERCISE-NAME."
+  (let ((case-fold-search t)
+        (results))
+    (dolist (workout-file (jackel--workout-files))
+      (with-temp-buffer
+        (insert-file-contents workout-file)
+        (org-mode)
+        (goto-char (point-min))
+        (while (search-forward-regexp (concat "^\\**[ a-zA-Z]+" exercise-name) nil t)
+          (let ((date)
+                (exercise-table))
+            (save-excursion
+              (jackel--move-up-to-workout)
+              (let* ((heading (org-get-heading)))
+                (save-match-data
+                  (string-match org-element--timestamp-regexp heading)
+                  (setq date (match-string 1 heading)))))
+            (save-excursion
+              (save-restriction
+                (org-narrow-to-subtree)
+                (when (search-forward-regexp org-table-line-regexp nil t)
+                  (setq exercise-table (org-table-to-lisp)))))
+            (when exercise-table
+              (push `((date . ,date)
+                      (data . ,exercise-table))
+                    results))))))
+    (seq-sort-by (lambda (elt) (alist-get 'date elt))
+                 #'string>
+                 results)))
+
+(progn
+  (jackel--scan-past-workout-exercises "Overhead Barbell Press")
+
+  (string-match org-element--timestamp-regexp
+                "Full Body #5 [2025-09-14 Sun]")
+  (match-string 1 "Full Body #5 [2025-09-14 Sun]"))
 
 
 ;;; Summaries and Statistics
@@ -554,11 +614,10 @@ Arguments may be reversed."
 
 ;; Lombardi’s formula is weight × reps ^ 0.1.
 
-(defun jackel--table-volume ()
-  "Calculate the volume of the current table."
-  (let ((col1 (jackel--column-name-to-type (org-table-get 1 1)))
-        (col2 (jackel--column-name-to-type (org-table-get 1 2)))
-        (data (org-table-to-lisp)))
+(defun jackel--table-volume (table-data)
+  "Calculate the volume from TABLE-DATA."
+  (let ((col1 (jackel--column-name-to-type (nth 0 (nth 0 table-data))))
+        (col2 (jackel--column-name-to-type (nth 1 (nth 0 table-data)))))
     (apply
      #'jackel--+
      (seq-map
@@ -568,13 +627,12 @@ Arguments may be reversed."
               (jackel--parse (car vals) col1)
             (jackel--* (jackel--parse (car vals) col1)
                        (jackel--parse (cadr vals) col2)))))
-      (seq-drop data 2)))))
+      (seq-drop table-data 2)))))
 
-(defun jackel--table-1rm ()
-  "Calculate the best 1RM in current table."
-  (let ((col1 (jackel--column-name-to-type (org-table-get 1 1)))
-        (col2 (jackel--column-name-to-type (org-table-get 1 2)))
-        (data (org-table-to-lisp)))
+(defun jackel--table-1rm (table-data)
+  "Calculate the best 1RM from TABLE-DATA."
+  (let ((col1 (jackel--column-name-to-type (nth 0 (nth 0 table-data))))
+        (col2 (jackel--column-name-to-type (nth 1 (nth 0 table-data)))))
     (apply
      #'jackel--max
      (seq-map
@@ -594,13 +652,12 @@ Arguments may be reversed."
                      (jackel--parse (cadr vals) col2)
                      (jackel--parse (car vals) col1)))
            (t nil))))
-      (seq-drop data 2)))))
+      (seq-drop table-data 2)))))
 
-(defun jackel--table-best-set-volume ()
-  "Calculate the best 1RM in current table."
-  (let ((col1 (jackel--column-name-to-type (org-table-get 1 1)))
-        (col2 (jackel--column-name-to-type (org-table-get 1 2)))
-        (data (org-table-to-lisp)))
+(defun jackel--table-best-set-volume (table-data)
+  "Calculate the best 1RM from TABLE-DATA."
+  (let ((col1 (jackel--column-name-to-type (nth 0 (nth 0 table-data))))
+        (col2 (jackel--column-name-to-type (nth 1 (nth 0 table-data)))))
     (apply
      #'jackel--max
      (seq-map
@@ -610,7 +667,7 @@ Arguments may be reversed."
               (jackel--parse (car vals) col1)
             (jackel--* (jackel--parse (car vals) col1)
                        (jackel--parse (cadr vals) col2)))))
-      (seq-drop data 2)))))
+      (seq-drop table-data 2)))))
 
 (defun jackel--1rm-brzycki (weight reps)
   (jackel--* weight (/ 1.0 (- 1.0278 (* 0.0278 reps)))))
@@ -729,14 +786,7 @@ by the command `jackel-fill-in'."
 (defun jackel--set-workout-to-active ()
   "Find the workout of the point and make it active, enabling jackel-workout-mode."
   ;; TODO: catch error and print nicer message
-  (catch 'done
-    (while t
-      (let ((at-elt (org-element-at-point)))
-        (when (and (eql (org-element-type at-elt) 'headline)
-                   (alist-get "JACKEL_WORKOUT_ROUTINE" (org-entry-properties) nil nil 'equal))
-          (message "Let's go!")
-          (throw 'done nil))
-        (org-up-element))))
+  (jackel--move-up-to-workout)
   (let* ((workout-name (alist-get "JACKEL_WORKOUT_ROUTINE" (org-entry-properties) nil nil 'equal))
          (workout-marker (make-marker)))
     (org-clock-in)
@@ -1442,15 +1492,39 @@ This overlay is normally placed at the end of an exercie's table.")
     (delete-overlay jackel-exercise-statistics-overlay)
     (setq jackel-exercise-statistics-overlay nil))
   (when (org-at-table-p)
-    (let* ((volume (jackel--table-volume))
-           (1rm (jackel--table-1rm))
-           (best-set-volume (jackel--table-best-set-volume))
+    (let* ((exercise-name (org-get-heading t t t t))
+           (last-exercise (cadr (jackel--scan-past-workout-exercises exercise-name)))
+           (current-data (org-table-to-lisp))
+           (volume (jackel--table-volume current-data))
+           (1rm (jackel--table-1rm current-data))
+           (best-set-volume (jackel--table-best-set-volume current-data))
            (ov (make-overlay (1- (org-table-end)) (1- (org-table-end)))))
-      (overlay-put ov 'after-string
-                   (format "\nBest 1RM: %s\nTotal Volume: %s\nBest set volume: %s\n"
-                           (jackel--value-to-string 1rm)
-                           (jackel--value-to-string volume)
-                           (jackel--value-to-string best-set-volume)))
+      (if last-exercise
+          (progn
+            ;; bookmark....
+            (let* ((last-data (alist-get 'data last-exercise))
+                   (last-date (alist-get 'date last-exercise))
+                   (last-volume (jackel--table-volume last-data))
+                   (last-1rm (jackel--table-1rm last-data))
+                   (last-best-set-volume (jackel--table-best-set-volume last-data)))
+              (overlay-put ov 'after-string
+                           (format (concat "\n"
+                                           "Best 1RM: %s (%s)\n"
+                                           "Total Volume: %s (%s)\n"
+                                           "Best set volume: %s (%s)\n"
+                                           "                       (%d days ago)\n")
+                                   (jackel--value-to-string 1rm)
+                                   (jackel--value-to-string last-1rm)
+                                   (jackel--value-to-string volume)
+                                   (jackel--value-to-string last-volume)
+                                   (jackel--value-to-string best-set-volume)
+                                   (jackel--value-to-string last-best-set-volume)
+                                   (- (org-time-stamp-to-now last-date))))))
+        (overlay-put ov 'after-string
+                     (format "\nBest 1RM: %s\nTotal Volume: %s\nBest set volume: %s\n"
+                             (jackel--value-to-string 1rm)
+                             (jackel--value-to-string volume)
+                             (jackel--value-to-string best-set-volume))))
       (setq jackel-exercise-statistics-overlay ov))))
 
 (defun jackel--header-line ()
@@ -1514,6 +1588,9 @@ It is expected that this function runs once a second."
             rest-time)))
 
 (defun jackel--rest-over-beep ()
+  (when (fboundp #'android-notifications-notify)
+    (android-notifications-notify :title "Rest Over" :body "your rest is over" :urgency 'normal
+                                  :group "jackel-rest-over"))
   (dotimes (_ 20)
     (sleep-for 0.01)
     (beep))
@@ -1547,7 +1624,10 @@ by adding certain keybindings and automatically tracking certain changes."
     (cancel-timer jackel-workout-mode-timer))
   (if (not jackel-workout-mode)
       (progn
-        (setq header-line-format nil))
+        (setq header-line-format nil)
+        (when (overlayp jackel-exercise-statistics-overlay)
+          (delete-overlay jackel-exercise-statistics-overlay)
+          (setq jackel-exercise-statistics-overlay nil)))
     (setq header-line-format (or jackel-active-workout-name ""))
     (setq-local org-log-done nil)
     (setq-local org-log-into-drawer nil)
