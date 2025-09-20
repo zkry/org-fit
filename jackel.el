@@ -86,6 +86,10 @@ By default, exercises are assumed to be of the type `(weight reps)'.")
   "Name of property which stores the musclegroup(s) that the exercise is for.
 This should be a comma seperated list of items.")
 
+(defconst jackel-exercise-replaced-from-property-name "JACKEL_REPLACED_FROM"
+  "Name of property which stores the musclegroup(s) that the exercise is for.
+This should be a comma seperated list of items.")
+
 ;; System-heading related
 
 (defvar jackel-exercises-heading "Exercises"
@@ -131,6 +135,9 @@ This is used to auto-clear fields when inputing a number.")
 
 (defvar jackel-active-workout-name nil
   "Variable to store the name of the current active routine.")
+
+(defvar jackel-workout-rest-time-history nil
+  "Stores a stack of rest time histories.")
 
 (defvar jackel-workout-rest-time nil
   "Cons of the float time when the rest timer started and the target rest time.
@@ -383,7 +390,7 @@ Recognized properties are:
                       (match-string 0 str))))
       (if unit
           (cons number
-n                (pcase unit
+                (pcase unit
                   ("kg" :kg)
                   ("lb" :lb)))
         (cons number jackel-default-unit)))))
@@ -452,6 +459,14 @@ Arguments may be reversed."
     (pcase-let ((`(,weight . ,unit) a))
       (cons (* weight b) unit)))))
 
+(defun jackel--convert (val to-type)
+  (let* ((raw-val (car val)))
+    (cons
+     (pcase (list (cdr val) to-type)
+       (`(:kg :lb) (* raw-val 2.20462))
+       (`(:lb :kg) (* raw-val 0.453592)))
+     to-type)))
+
 (defun jackel--reduce (op &rest items)
   "Multiply a weight A by a scalar amount B.
 Arguments may be reversed."
@@ -459,9 +474,10 @@ Arguments may be reversed."
    (lambda (acc elt)
      (cond
       ((and (consp acc) (consp elt))
-       (unless (equal (cdr acc) (cdr elt))
-         (error "enable to add values of two different types"))
-       (cons (funcall op (car acc) (car elt)) (cdr acc)))
+       (if (equal (cdr acc) (cdr elt))
+           (cons (funcall op (car acc) (car elt)) (cdr acc))
+         (let ((converted-elt (jackel--convert elt (cdr acc))))
+           (cons (funcall op (car acc) (car converted-elt)) (cdr acc)))))
       ((or (consp elt) (consp acc))
        (error "enable to add values of two different types"))
       (t (funcall + acc elt))))
@@ -890,6 +906,7 @@ by the command `jackel-fill-in'."
     (keymap-set map "S-<down>" #'org-move-subtree-down)
 
     ;; Data Entry
+    (keymap-set map "u" #'jackel-workout-convert-unit)
     (keymap-set map "<spc>" #'jackel-fill-in)
     (keymap-set map "<SPC>" #'jackel-fill-in)
     (keymap-set map "\"" #'jackel-workout-ditto) ;; something more native?
@@ -902,8 +919,11 @@ by the command `jackel-fill-in'."
 
     ;; Session Management
     (keymap-set map "r" #'jackel-workout-rest)
+    (keymap-set map "C-c r" #'jackel-workout-rest-pop)
+    (keymap-set map "R" #'jackel-workout-rest)
     (keymap-set map "P" #'jackel-workout-pause-start-session)
     (keymap-set map "Q" #'jackel-workout-quit)
+    (keymap-set map "U" #'undo)
 
     map)
   "Mode map for `jackel-workout-mode'.")
@@ -1051,8 +1071,8 @@ A plan is a special note that indicates how the user intends to complete a set."
 (defun jackel--start-rest-timer (&optional target)
   "Set the rest timer.
 If TARGET is an integer, set timer for TARGET seconds in the future."
-  (setq jackel-workout-rest-time (cons (floor (float-time)) target)))
-
+  (setq jackel-workout-rest-time (cons (floor (float-time)) target))
+  (push jackel-workout-rest-time jackel-workout-rest-time-history))
 
 (defun jackel--add-rest-time (seconds)
   "Add SECONDS to the current rest time.
@@ -1377,15 +1397,20 @@ SECONDS after now."
 (defun jackel-workout-swap-exercise (exercise-name arg)
   "Replace current exercise with a different exercise named EXERCISE-NAME."
   (interactive (list (jackel-read-exercise) (prefix-numeric-value current-prefix-arg)))
-  (if (= arg 4)
-      (jackel--with-workout-fold-settings
-        (let ((m (make-marker)))
-          (set-marker m (point))
-          (jackel-workout-remove-exercise)
-          (goto-char m)
-          (forward-line -1)
-          (jackel-workout-add-exercise exercise-name)))
-    (org-edit-headline exercise-name)))
+  (let ((prev-replaced (org-entry-get (point) jackel-exercise-replaced-from-property-name))
+        (current-val (org-get-heading t t t t)))
+    (unless (equal exercise-name current-val)
+      (unless prev-replaced
+        (org-set-property jackel-exercise-replaced-from-property-name current-val))
+      (if (= arg 4)
+          (jackel--with-workout-fold-settings
+           (let ((m (make-marker)))
+             (set-marker m (point))
+             (jackel-workout-remove-exercise)
+             (goto-char m)
+             (forward-line -1)
+             (jackel-workout-add-exercise exercise-name)))
+        (org-edit-headline exercise-name)))))
 
 (defun jackel-workout-toggle-view ()
   "Toggle view mode from viewing current set to viewing all."
@@ -1398,6 +1423,26 @@ SECONDS after now."
     (message "View set to showing all."))
   (org-fold-show-all '(headings))
   (jackel--apply-fold-setting))
+
+(defun jackel-workout-convert-unit (arg)
+  "Convert the unit of a value.
+With a prefix ARG, convert the value back into the default unit."
+  (interactive "p")
+  (let* ((line (org-table-current-line))
+         (col (org-table-current-column))
+         (type (jackel--column-name-to-type (org-table-get 1 col))))
+    (unless (eql type 'weight)
+      (user-error "Not on a weight field"))
+    (pcase-let* ((`(,val . ,unit) (jackel--parse-weight
+                                   (org-table-get line col)))
+                 (new-weight (if (eql unit :kg)
+                                 (cons val :lb)
+                               (cons val :kg))))
+      (if (= arg 4)
+          (org-table-put line col (jackel--weight-to-string (jackel--convert new-weight
+                                                                             jackel-default-unit)))
+        (org-table-put line col (jackel--weight-to-string new-weight)))
+      (org-table-align))))
 
 (defun jackel-fill-in ()
   "Fill in the current cell according to note."
@@ -1507,7 +1552,14 @@ With two prefix args, prompt the user for a custom time to run."
     (jackel--add-rest-time 15 ))
    (t
     (let* ((rest-str (org-entry-get (point) jackel-autorest-property-name)))
-     (jackel--start-rest-timer (when rest-str (jackel--parse-duration rest-str)))))))
+      (jackel--start-rest-timer (when rest-str (jackel--parse-duration rest-str)))))))
+
+(defun jackel-workout-rest-pop ()
+  "Use the periosly started rest time, discarding the current."
+  (interactive)
+  (if jackel-workout-rest-time-history
+      (setq jackel-workout-rest-time (pop jackel-workout-rest-time-history))
+    (setq jackel-workout-rest-time nil)))
 
 (defun jackel-workout-ditto (arg)
   "Copy the value of the row above for the current cell.
@@ -1705,7 +1757,9 @@ by adding certain keybindings and automatically tracking certain changes."
         (setq header-line-format nil)
         (when (overlayp jackel-exercise-statistics-overlay)
           (delete-overlay jackel-exercise-statistics-overlay)
-          (setq jackel-exercise-statistics-overlay nil)))
+          (setq jackel-exercise-statistics-overlay nil)
+          (setq jackel-workout-rest-time-history nil)
+          (setq jackel-workout-rest-time nil)))
     (setq header-line-format (or jackel-active-workout-name ""))
     (setq-local org-log-done nil)
     (setq-local org-log-into-drawer nil)
