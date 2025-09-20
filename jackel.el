@@ -383,7 +383,7 @@ Recognized properties are:
                       (match-string 0 str))))
       (if unit
           (cons number
-                (pcase unit
+n                (pcase unit
                   ("kg" :kg)
                   ("lb" :lb)))
         (cons number jackel-default-unit)))))
@@ -565,6 +565,37 @@ Arguments may be reversed."
         (push f files)))
     (nreverse files)))
 
+(defun jackel--scan-past-workout-routines (routine-name)
+  "Scan all workouts for routines of ROUTINE-NAME."
+  (let ((case-fold-search t)
+        (results))
+    (dolist (workout-file (jackel--workout-files))
+      (with-temp-buffer
+        (insert-file-contents workout-file)
+        (org-mode)
+        (goto-char (point-min))
+        (while (search-forward-regexp (concat ":JACKEL_WORKOUT_ROUTINE:.*"
+                                              (regexp-quote routine-name))
+                                      nil t)
+          (let ((date)
+                (routine-text))
+            (save-excursion
+              (jackel--move-up-to-workout)
+              (let* ((heading (org-get-heading)))
+                (save-match-data
+                  (string-match org-element--timestamp-regexp heading)
+                  (setq date (match-string 1 heading)))))
+            (save-excursion
+              (save-restriction
+                (org-narrow-to-subtree)
+                (setq routine-text (buffer-string))))
+            (push `((date . ,date)
+                    (routine . ,routine-text))
+                  results)))))
+    (seq-sort-by (lambda (elt) (alist-get 'date elt))
+                 #'string>
+                 results)))
+
 (defun jackel--scan-past-workout-exercises (exercise-name)
   "Scan all workouts for exercises of EXERCISE-NAME."
   (let ((case-fold-search t)
@@ -596,12 +627,6 @@ Arguments may be reversed."
                  #'string>
                  results)))
 
-(progn
-  (jackel--scan-past-workout-exercises "Overhead Barbell Press")
-
-  (string-match org-element--timestamp-regexp
-                "Full Body #5 [2025-09-14 Sun]")
-  (match-string 1 "Full Body #5 [2025-09-14 Sun]"))
 
 
 ;;; Summaries and Statistics
@@ -698,6 +723,16 @@ Arguments may be reversed."
       ('reps (format "x%s" val))
       ('weight (jackel--weight-to-string (jackel--parse-weight val))))))
 
+(defun jackel--remove-plan-note (note)
+  "Remotve workout plan section of NOTE if exits.
+Workout plan is the first semicolon separated section of a note
+that contains direction what should be filled in the table."
+
+  (let* ((parts (string-split note ";" )))
+    (if (jackel--plan-note-p  (car parts))
+        (string-join (cdr parts) "")
+      note)))
+
 (defun jackel--routine-sets-to-notes (routine-str)
   "Move all inputted data to notes section for ROUTINE-STR.
 Routine definitions are meant to store the templates of workouts
@@ -723,7 +758,7 @@ by the command `jackel-fill-in'."
                               (old-note (org-table-get line 2))
                               (new-note (if (string-blank-p old-note)
                                             note
-                                          (concat note "; " old-note))))
+                                          (concat note "; " (jackel--remove-plan-note old-note)))))
                          (org-table-put line 2 new-note)
                          (org-table-put line 1 ""))
                      (let* ((note1 (jackel--make-note (org-table-get line 1) col1))
@@ -732,7 +767,7 @@ by the command `jackel-fill-in'."
                             (old-note (org-table-get line 3))
                             (new-note (if (string-blank-p old-note)
                                           note
-                                        (concat note "; " old-note))))
+                                        (concat note "; " (jackel--remove-plan-note old-note)))))
                        (org-table-put line 1 "")
                        (org-table-put line 2 "")
                        (org-table-put line 3 new-note)))))
@@ -746,11 +781,24 @@ by the command `jackel-fill-in'."
       (insert routine)
       (org-mode)
       (goto-char (point-min))
+      ;; Remove date in header
+      ;; Remove DONE status
+      (save-excursion
+        (while (re-search-forward " +DONE" nil t)
+          (replace-match "")))
+      (save-excursion
+        (while (re-search-forward ":LOGBOOK:" nil t)
+          (let ((start (pos-bol)))
+            (when (re-search-forward ":END:" nil t)
+              (delete-region start (pos-eol))))))
       (save-excursion
         (while (search-forward ":jackel_routine:" nil t)
           (delete-region (1- (pos-bol)) (pos-eol))))
       (while (not (looking-at org-heading-regexp))
         (forward-line t))
+      (save-excursion
+        (when (search-forward-regexp org-ts-regexp-both (pos-eol) t)
+          (replace-match "")))
       (save-excursion
         (let* ((hl-elt (org-element-at-point))
                (hl-name (org-element-property :raw-value hl-elt)))
@@ -759,8 +807,8 @@ by the command `jackel-fill-in'."
           (org-set-property "JACKEL_WORKOUT_ROUTINE" hl-name)))
       (buffer-string))))
 
-(defun jackel--capture-new-workout (routine-name)
-  "Given a routine by ROUTINE-NAME, create new workout entry according to contents."
+(defun jackel--capture-new-workout (routine-string)
+  "Create new workout entry according to contents of ROUTINE-STRING."
   ;;; org-capture-goto-target
   (let* ((selected-template
           (if (= (length jackel-workout-capture-templates) 1)
@@ -775,7 +823,7 @@ by the command `jackel-fill-in'."
                         jackel-workout-capture-templates))))
          (workout-contents (jackel--routine-sets-to-notes
                             (jackel--routine-string-to-workout
-                             (jackel--get-routine-by-name routine-name))))
+                             routine-string)))
          ;; TODO: if more than one, prompt user
          (org-capture-entry `("t" "" entry ,(cadr selected-template)
                               ,workout-contents
@@ -907,9 +955,20 @@ If NOTE is a string, use that instead of getting the current line's cell."
     (error "No set on current line"))
   (let* ((note-text (or note (jackel--line-note t))))
     (cond
-     ((string-match "x\\([1-9][0-9]*\\)" note-text)
+     ((string-match "x ?\\([1-9][0-9]*\\)" note-text)
       (let* ((reps (match-string 1 note-text)))
         (string-to-number reps))))))
+
+(defun jackel--plan-note-p (note)
+  "Return non-nil if NOTE is a plan.
+A plan is a special note that indicates how the user intends to complete a set."
+  ;; TODO this is a hackey way to determine this but it seems like it
+  ;; should work.
+  (seq-every-p
+   (lambda (part)
+     (or (string= part "x")
+         (string-match-p "[0-9]" part)))
+   (string-split note " " t " ")))
 
 ;; TODO: time spec of MM:SS or HH:MM:SS or min s sec h hour second minute
 ;; TODO: distance spec of mi, km, m, ft, cm, or in.
@@ -1501,7 +1560,6 @@ This overlay is normally placed at the end of an exercie's table.")
            (ov (make-overlay (1- (org-table-end)) (1- (org-table-end)))))
       (if last-exercise
           (progn
-            ;; bookmark....
             (let* ((last-data (alist-get 'data last-exercise))
                    (last-date (alist-get 'date last-exercise))
                    (last-volume (jackel--table-volume last-data))
@@ -1636,11 +1694,35 @@ by adding certain keybindings and automatically tracking certain changes."
     (when (fboundp 'set-text-conversion-style)
       (set-text-conversion-style nil))))
 
-
 (defun jackel-new-workout (routine-headline)
   "Create a new workout set for selected ROUTINE-HEADLINE."
   (interactive (list (jackel-read-routine)))
-  (jackel--capture-new-workout routine-headline))
+  (let* ((past-routines (jackel--scan-past-workout-routines routine-headline)))
+    (cond
+     ((= 0 (length past-routines))
+      (jackel--capture-new-workout (jackel--get-routine-by-name routine-headline)))
+     (t
+      (let* ((choice (completing-read "Create a new routine..."
+                                      (seq-filter #'identity
+                                              `("from original template"
+                                                "from most recent exercise routine"
+                                                ,(and (> (length past-routines) 1)
+                                                      "select from list of past completed routines")))
+                                      nil t)))
+        (pcase choice
+          ("from original template"
+           (jackel--capture-new-workout (jackel--get-routine-by-name routine-headline)))
+          ("from most recent exercise routine"
+           (jackel--capture-new-workout (alist-get 'routine (car past-routines))))
+          ("select from list of past completed routines"
+           (let* ((dates (seq-map (lambda (x) (alist-get 'date x)) past-routines))
+                  (selected-date (completing-read "Use routine completed on date: "
+                                                  dates)))
+             (jackel--capture-new-workout
+              (alist-get 'routine
+                         (seq-find (lambda (r)
+                                     (equal selected-date (alist-get 'date r)))
+                                   past-routines)))))))))))
 
 (defun jackel-start-workout ()
   "Start or continue the workout at the current point."
@@ -1665,6 +1747,7 @@ by adding certain keybindings and automatically tracking certain changes."
 (defun jackel-workout-quit ()
   "Quit the current workout."
   (interactive)
+  (jackel--process-table-changes)
   (when org-clock-current-task
     (org-clock-out))
   (jackel-workout-mode 0)
