@@ -733,6 +733,31 @@ that contains direction what should be filled in the table."
         (string-join (cdr parts) "")
       note)))
 
+(defun jackel--routine-set-to-note (line)
+  "Blank out table LINE number and store it in notes."
+  (let* ((col1 (jackel--column-name-to-type (org-table-get 1 1)))
+         (col2 (jackel--column-name-to-type (org-table-get 1 2)))
+         (_col3 (jackel--column-name-to-type (org-table-get 1 3))))
+    (let* ((two-input-table-p (equal (jackel--table-current-column-type 3) 'notes)))
+      (if two-input-table-p
+          (let* ((note1 (jackel--make-note (org-table-get line 1) col1))
+               (note2 (jackel--make-note (org-table-get line 2) col2))
+               (note (concat note1 " " note2))
+               (old-note (jackel--remove-plan-note (org-table-get line 3)))
+               (new-note (if (string-blank-p old-note)
+                             note
+                           (concat note "; " old-note))))
+          (org-table-put line 1 "")
+          (org-table-put line 2 "")
+          (org-table-put line 3 new-note))
+        (let* ((note (jackel--make-note (org-table-get line 1) col1))
+                 (old-note (jackel--remove-plan-note (org-table-get line 2)))
+                 (new-note (if (string-blank-p old-note)
+                               note
+                             (concat note "; " old-note))))
+            (org-table-put line 2 new-note)
+            (org-table-put line 1 ""))))))
+
 (defun jackel--routine-sets-to-notes (routine-str)
   "Move all inputted data to notes section for ROUTINE-STR.
 Routine definitions are meant to store the templates of workouts
@@ -746,31 +771,10 @@ by the command `jackel-fill-in'."
     (goto-char (point-min))
     (while (search-forward (concat "| " jackel-column-name-notes) nil t)
         (org-table-analyze)
-        (let* ((line-ct (- (length org-table-dlines) 2))
-               (col-ct org-table-current-ncol)
-               (col1 (jackel--column-name-to-type (org-table-get 1 1)))
-               (col2 (jackel--column-name-to-type (org-table-get 1 2)))
-               (_col3 (jackel--column-name-to-type (org-table-get 1 3))))
+        (let* ((line-ct (- (length org-table-dlines) 2)))
           (cl-loop for line from 2 to (1+ line-ct)
                    do
-                   (if (= col-ct 2)
-                       (let* ((note (jackel--make-note (org-table-get line 1) col1))
-                              (old-note (org-table-get line 2))
-                              (new-note (if (string-blank-p old-note)
-                                            note
-                                          (concat note "; " (jackel--remove-plan-note old-note)))))
-                         (org-table-put line 2 new-note)
-                         (org-table-put line 1 ""))
-                     (let* ((note1 (jackel--make-note (org-table-get line 1) col1))
-                            (note2 (jackel--make-note (org-table-get line 2) col2))
-                            (note (concat note1 " " note2))
-                            (old-note (org-table-get line 3))
-                            (new-note (if (string-blank-p old-note)
-                                          note
-                                        (concat note "; " (jackel--remove-plan-note old-note)))))
-                       (org-table-put line 1 "")
-                       (org-table-put line 2 "")
-                       (org-table-put line 3 new-note)))))
+                   (jackel--routine-set-to-note line)))
         (org-table-align))
     (buffer-string)))
 
@@ -873,6 +877,7 @@ by the command `jackel-fill-in'."
     (keymap-set map "W" #'jackel-workout-add-warmup-set)
     (keymap-set map "e" #'org-table-edit-field)
     (keymap-set map "x" #'org-table-blank-field)
+    (keymap-set map ">" #'jackel-stash-set)
 
     ;; Exercise Management
     (keymap-set map "E" #'jackel-workout-add-exercise)
@@ -1338,6 +1343,14 @@ SECONDS after now."
                            "warmup")
                          t))))))
 
+(defun jackel-stash-set ()
+  "Blank the current set line and store it in a not on the current line."
+  (interactive)
+  (unless (org-at-table-p)
+    (user-error "No table at point"))
+  (jackel--routine-set-to-note (org-table-current-line))
+  (org-table-align))
+
 (defun jackel-workout-note-set (note)
   "Add a new note NOTE to the current set."
   (interactive "sNote: ")
@@ -1496,9 +1509,10 @@ With two prefix args, prompt the user for a custom time to run."
     (let* ((rest-str (org-entry-get (point) jackel-autorest-property-name)))
      (jackel--start-rest-timer (when rest-str (jackel--parse-duration rest-str)))))))
 
-(defun jackel-workout-ditto ()
-  "Copy the value of the cell above for the current cell."
-  (interactive)
+(defun jackel-workout-ditto (arg)
+  "Copy the value of the row above for the current cell.
+If a prefix ARG is provided, copy the entire row."
+  (interactive "p")
   (unless (jackel--on-set-line)
     (user-error "No set on current line"))
   (let* ((current-line (org-table-current-line)))
@@ -1508,8 +1522,14 @@ With two prefix args, prompt the user for a custom time to run."
         (if two-input-table-p
             (let* ((up-val1 (org-table-get (1- current-line) 1))
                    (up-val2 (org-table-get (1- current-line) 2)))
-              (org-table-put current-line 1 up-val1 t)
-              (org-table-put current-line 2 up-val2 t))
+              (if (= arg 4)
+                  (progn
+                    (org-table-put current-line 1 up-val1 t)
+                    (org-table-put current-line 2 up-val2 t))
+                (when (string-blank-p (org-table-get current-line 1))
+                  (org-table-put current-line 1 up-val1 t))
+                (when (string-blank-p (org-table-get current-line 2))
+                  (org-table-get current-line 2))))
           (let* ((up-val (org-table-get (1- current-line) 1)))
             (org-table-put current-line 1 up-val t)))))))
 
