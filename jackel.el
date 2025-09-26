@@ -507,6 +507,27 @@ Arguments may be reversed."
 
 ;;; Exercises
 
+(defun jackel--exercise-body (exercise-name)
+  "Find and return body of definition for EXERCISE-NAME."
+  (catch 'done
+    (dolist (file jackel-exercise-routine-files)
+      (with-temp-buffer
+        (insert-file-contents file)
+        (org-mode)
+        (goto-char (point-min))
+        (let ((case-fold-search t))
+          (while (search-forward exercise-name nil t)
+            (let* ((hl (org-element-at-point)))
+              (when (equal (org-element-property :raw-value hl) exercise-name)
+                (goto-char (org-element-property :contents-begin hl))
+                (forward-line 0)
+                (while (looking-at-p " *:")
+                  (forward-line 1))
+                (throw 'done
+                       (buffer-substring-no-properties (point)
+                                                       (org-element-property :contents-end hl)))))))))))
+
+
 (defun jackel--string-to-exercise-type (str)
   "Given an string STR return list of input column types."
   ;; "weight+reps\", \"distance+time\", \"reps\", \"time\", or \"weight+time\"
@@ -899,7 +920,7 @@ by the command `jackel-fill-in'."
     (keymap-set map "E" #'jackel-workout-add-exercise)
     (keymap-set map "D" #'jackel-workout-remove-exercise)
     (keymap-set map "S" #'jackel-workout-swap-exercise)
-    ;; (keymap-set map "i" #'jackel-workout-info-dwim)
+    (keymap-set map "i" #'jackel-workout-info-dwim)
     (keymap-set map "v" #'jackel-workout-toggle-view)
 
     (keymap-set map "S-<up>" #'org-move-subtree-up)
@@ -1424,6 +1445,28 @@ SECONDS after now."
   (org-fold-show-all '(headings))
   (jackel--apply-fold-setting))
 
+(defun jackel-workout-info-dwim ()
+  "Display info buffer regarding current position."
+  (interactive)
+  (let* ((on-routine-p (alist-get "JACKEL_WORKOUT_ROUTINE" (org-entry-properties) nil nil 'equal)))
+    ;; TODO - should I add anything here for supersets?
+    (unless on-routine-p
+      (let* ((exercise-name (org-get-heading t t t t))
+             (body (jackel--exercise-body exercise-name))
+             (history (jackel--scan-past-workout-exercises exercise-name))
+             (current (save-excursion
+                        (save-restriction
+                          (goto-char (point-min))
+                          (search-forward-regexp "^|")
+                          (org-table-to-lisp))))
+             (buf (get-buffer-create (format "*Exercise: %s*" exercise-name))))
+        (with-current-buffer buf
+          (erase-buffer)
+          (insert exercise-name)
+          (insert "\n")
+          (insert body)
+          (visual-line-mode 1))))))
+
 (defun jackel-workout-convert-unit (arg)
   "Convert the unit of a value.
 With a prefix ARG, convert the value back into the default unit."
@@ -1806,7 +1849,7 @@ by adding certain keybindings and automatically tracking certain changes."
 (defun jackel-new-workout-and-start (routine-headline)
   "Cerate new instance of ROUTINE-HEADLINE and start it."
   (interactive (list (jackel-read-routine)))
-  (jackel--capture-new-workout routine-headline)
+  (jackel-new-workout routine-headline)
   (jackel--set-workout-to-active))
 
 (defun jackel-workout-pause-start-session ()
