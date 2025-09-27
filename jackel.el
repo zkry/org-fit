@@ -447,6 +447,8 @@ Value can be a united number or a plain number."
   "Multiply a weight A by a scalar amount B.
 Arguments may be reversed."
   (cond
+   ((or (null a) (null b))
+    nil)
    ((and (consp a) (consp b))
     (pcase-let ((`(,scalar1 . ,unit1) a)
                 (`(,scalar2 . ,unit2) b))
@@ -473,6 +475,10 @@ Arguments may be reversed."
   (seq-reduce
    (lambda (acc elt)
      (cond
+      ((null acc)
+       elt)
+      ((null elt)
+       acc)
       ((and (consp acc) (consp elt))
        (if (equal (cdr acc) (cdr elt))
            (cons (funcall op (car acc) (car elt)) (cdr acc))
@@ -1624,7 +1630,7 @@ If a prefix ARG is provided, copy the entire row."
                 (when (string-blank-p (org-table-get current-line 1))
                   (org-table-put current-line 1 up-val1 t))
                 (when (string-blank-p (org-table-get current-line 2))
-                  (org-table-get current-line 2))))
+                  (org-table-put current-line 2 up-val2 t))))
           (let* ((up-val (org-table-get (1- current-line) 1)))
             (org-table-put current-line 1 up-val t)))))))
 
