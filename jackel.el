@@ -510,6 +510,22 @@ Arguments may be reversed."
           (throw 'done nil))
         (org-up-element)))))
 
+(defun jackel-table-to-lisp (&optional txt)
+  "Convert a table to a list of plists representing the sets of an exercise."
+  (let* ((data (org-table-to-lisp txt))
+         (col-types (seq-map #'jackel--column-name-to-type (car data))))
+    (seq-map (lambda (row)
+               (apply #'append
+                (seq-mapn
+                 (lambda (str type)
+                   (cond
+                    ((eql type 'notes)
+                     (let* ((target (jackel--extract-table-from-note str)))
+                       (list 'notes str 'target target)))
+                    (t (list type (jackel--parse str type)))))
+                 row col-types)))
+             (cddr data))))
+
 
 ;;; Exercises
 
@@ -598,7 +614,6 @@ Arguments may be reversed."
 
 
 ;;; History
-
 
 (defun jackel--workout-files ()
   "Return list of files which contain workouts."
@@ -696,6 +711,48 @@ Arguments may be reversed."
             (jackel--* (jackel--parse (car vals) col1)
                        (jackel--parse (cadr vals) col2)))))
       (seq-drop table-data 2)))))
+
+(defun jackel--table-1rm-row (table-data)
+  "Return row data of best 1rm from TABLE-DATA."
+  (let ((col1 (jackel--column-name-to-type (nth 0 (nth 0 table-data))))
+        (col2 (jackel--column-name-to-type (nth 1 (nth 0 table-data))))
+        (1rm-to-row (make-hash-table :test #'equal))
+        (best-1rm))
+    (setq best-1rm
+          (apply
+           #'jackel--max
+           (seq-map
+            (lambda (row)
+              (let* ((vals (butlast row 1))
+                     (1rm (cond
+                           ((= (length vals) 1)
+                            nil)
+                           ((and (eql col1 'weight)
+                                 (eql col2 'reps))
+                            (funcall jackel-1rm-function
+                                     (jackel--parse (car vals) col1)
+                                     (jackel--parse (cadr vals) col2)))
+                           ((and (eql col1 'reps)
+                                 (eql col2 'weight))
+                            (funcall jackel-1rm-function
+                                     (jackel--parse (cadr vals) col2)
+                                     (jackel--parse (car vals) col1)))
+                           (t nil))))
+                (when (> (length vals) 1)
+                  (pcase-let* ((`(,weight ,reps)
+                                (cond
+                                 ((and (eql col1 'weight)
+                                       (eql col2 'reps))
+                                  (list (jackel--parse (car vals) col1) (jackel--parse (cadr vals) col2)))
+                                 ((and (eql col1 'reps)
+                                       (eql col2 'weight))
+                                  (list (jackel--parse (cadr vals) col2) (jackel--parse (car vals) col1))))))
+                    (when (and weight reps)
+                      (let* ((1rm (funcall jackel-1rm-function weight reps)))
+                        (puthash 1rm (list weight reps) 1rm-to-row)
+                        1rm))))))
+            (seq-drop table-data 2))))
+    (gethash best-1rm 1rm-to-row)))
 
 (defun jackel--table-1rm (table-data)
   "Calculate the best 1RM from TABLE-DATA."
@@ -1024,11 +1081,11 @@ A plan is a special note that indicates how the user intends to complete a set."
 
 ;; TODO: time spec of MM:SS or HH:MM:SS or min s sec h hour second minute
 ;; TODO: distance spec of mi, km, m, ft, cm, or in.
-(defun jackel--extract-table-from-note ()
+(defun jackel--extract-table-from-note (&optional note)
   "Return a preset value alist of notes column of current line."
   (when (> (org-table-current-line) 1)
-    (let* ((maybe-reps (jackel--target-reps-of-set))
-           (maybe-weight (jackel--target-weight-of-set))
+    (let* ((maybe-reps (jackel--target-reps-of-set note))
+           (maybe-weight (jackel--target-weight-of-set note))
            (res))
       (when maybe-reps
         (push (cons 'reps maybe-reps) res))
@@ -1470,8 +1527,46 @@ SECONDS after now."
           (erase-buffer)
           (insert exercise-name)
           (insert "\n")
-          (insert body)
-          (visual-line-mode 1))))))
+          (when body
+            (insert body)
+            (insert "\n"))
+          (let* ((best-set-volume (apply #'jackel--max
+                                         (seq-map
+                                          (lambda (hist)
+                                            (jackel--table-best-set-volume (alist-get 'data hist)))
+                                          history)))
+                 (best-volume (apply #'jackel--max
+                                     (seq-map
+                                      (lambda (hist)
+                                        (jackel--table-volume (alist-get 'data hist)))
+                                      history)))
+                 (best-1rm (apply #'jackel--max
+                                  (seq-map
+                                   (lambda (hist)
+                                     (jackel--table-1rm (alist-get 'data hist)))
+                                   history)))
+                 (best-1rm-hist (seq-find
+                                 (lambda (hist)
+                                   (and
+                                    (equal best-1rm
+                                           (jackel--table-1rm (alist-get 'data hist)))
+                                    hist))
+                                 history))
+                 (best-1rm-date (alist-get 'date best-1rm-hist))
+                 (best-1rm-row (jackel--table-1rm-row (alist-get 'data best-1rm-hist))))
+            (insert (format "   Best Set Volume: %s\n" (jackel--value-to-string best-set-volume)))
+            (insert (format "   Best Volume: %s\n" (jackel--value-to-string best-volume)))
+            (insert (format "   Best 1RM: %s on %s with %s x%d\n"
+                            (jackel--value-to-string best-1rm)
+                            best-1rm-date
+                            (jackel--value-to-string (car best-1rm-row))
+                            (cadr best-1rm-row))))
+
+          (insert (format "Current 1RM: %s" (jackel--value-to-string (jackel--table-1rm current))))
+
+          (special-mode)
+          (visual-line-mode 1))
+        (display-buffer buf)))))
 
 (defun jackel-workout-convert-unit (arg)
   "Convert the unit of a value.
