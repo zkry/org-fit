@@ -171,7 +171,7 @@ While you may save workouts in any of the files listed here, they
 can be stored separately."
   :type '(repeat file))
 
-;; (setq org-fit-exercise-routine-files '("/Users/zacharyromero/org-workspace/apps/routines.org" "/Users/zacharyromero/dev/emacs/org-fit/exercises.org"))
+;; (setq org-fit-exercise-routine-files '("/Users/zacharyromero/org-workspace/apps/routines.org" "/Users/zacharyromero/dev/emacs/jackel/exercises.org"))
 
 (defcustom org-fit-workout-capture-templates '()
   "Capture location of new workouts.
@@ -262,6 +262,8 @@ Recognized properties are:
 (defun org-fit-extract-routines ()
   "Return a list of available routines."
   (let* ((exercises (org-fit-extract-exercises)) ;; TODO - to hashmap?? ;; TODO - error if no exercises
+         (_ (when (seq-empty-p exercises)
+              (error "Unable to find exercises")))
          (routines)
          (case-fold-search t))
     (dolist (file org-fit-exercise-routine-files)
@@ -304,6 +306,8 @@ Recognized properties are:
 (defun org-fit-read-routine ()
   "Prompt user to select a known routine."
   (let* ((routines (org-fit-extract-routines))
+         (_ (when (seq-empty-p routines)
+              (error "Unable to find routines")))
          (max-size (apply #'max (seq-map #'length (seq-map #'car routines))))
          (max-parent-name-size (apply #'max (seq-map (lambda (x)
                                                        (length (alist-get 'parent-name (cdr x))))
