@@ -1,9 +1,9 @@
-;;; jackel.el --- Jackel is an org-mode based workout trakcer -*- lexical-binding: t -*-
+;;; org-fit.el --- Org-Fit is an org-mode based workout trakcer -*- lexical-binding: t -*-
 
 ;; Author: Zachary Romero
 ;; Version: 0.1.1
 ;; Package-Requires: ((emacs "29.1"))
-;; Homepage: https://github.com/zkry/jackel
+;; Homepage: https://github.com/zkry/org-fit
 ;; Keywords: tools
 
 ;; This file is not part of GNU Emacs
@@ -23,7 +23,7 @@
 
 ;;; Commentary:
 
-;; Jackel is a org-mode based workout tracker.
+;; Org-Fit is a org-mode based workout tracker.
 
 ;;; Code:
 
@@ -34,16 +34,16 @@
 
 (require 'seq)
 
-(defgroup jackel nil
+(defgroup org-fit nil
   "Emacs Search Tool Aggregator."
-  :prefix "jackel"
+  :prefix "org-fit"
   :group 'applications)
 
-(defcustom jackel-default-unit :kg
+(defcustom org-fit-default-unit :kg
   "Default unit to log in if not specified."
   :type '(choice (const :kg) (const :lb)))
 
-(defcustom jackel-warmup-program
+(defcustom org-fit-warmup-program
   '(((.6 . 5))
     ((.4 . 5)
      (.8 . 3))
@@ -63,7 +63,7 @@
   :type
   '(repeat (repeat (cons float natnum))))
 
-(defcustom jackel-1rm-function #'jackel--1rm-brzycki
+(defcustom org-fit-1rm-function #'org-fit--1rm-brzycki
   "Default 1rm calculationf function to use.
 This should be a function that takes two arguments, a weight and rep count."
   :type 'function)
@@ -73,107 +73,107 @@ This should be a function that takes two arguments, a weight and rep count."
 
 ;; Properties
 
-(defconst jackel-autorest-property-name "JACKEL_AUTOREST"
+(defconst org-fit-autorest-property-name "ORG_FIT_AUTOREST"
   "The name of the property which defines how long rest intervals should be.")
-(defconst jackel-exercise-type-property-name "JACKEL_EXERCISE_TYPE"
+(defconst org-fit-exercise-type-property-name "ORG_FIT_EXERCISE_TYPE"
   "Name of the property which defines how an exercise is to be recorded.
 It can be any of the following strings: \"weight+reps\", \"distance+time\",
 \"reps\", \"time\", or \"weight+time\".
 
 By default, exercises are assumed to be of the type `(weight reps)'.")
 
-(defconst jackel-exercise-muscle-group-property-name "JACKEL_MUSCLE_GROUP"
+(defconst org-fit-exercise-muscle-group-property-name "ORG_FIT_MUSCLE_GROUP"
   "Name of property which stores the musclegroup(s) that the exercise is for.
 This should be a comma seperated list of items.")
 
-(defconst jackel-exercise-replaced-from-property-name "JACKEL_REPLACED_FROM"
+(defconst org-fit-exercise-replaced-from-property-name "ORG_FIT_REPLACED_FROM"
   "Name of property which stores the musclegroup(s) that the exercise is for.
 This should be a comma seperated list of items.")
 
 ;; System-heading related
 
-(defvar jackel-exercises-heading "Exercises"
+(defvar org-fit-exercises-heading "Exercises"
   "Top-level heading for which the directory of exercises are located.")
 
-(defvar jackel-routines-heading "Routines"
+(defvar org-fit-routines-heading "Routines"
   "Top-level heading for which the directory of exercise routines are located.")
 
-(defvar jackel-workouts-heading "Workouts"
+(defvar org-fit-workouts-heading "Workouts"
   "Top-level heading for which the directory of workouts are located.")
 
 ;; Table-related
 
-(defconst jackel-column-name-weight "weight"
+(defconst org-fit-column-name-weight "weight"
   "The column name for recording a weight.")
-(defconst jackel-column-name-reps "reps"
+(defconst org-fit-column-name-reps "reps"
   "The column name for recording a rep count.")
-(defconst jackel-column-name-distance "distance"
+(defconst org-fit-column-name-distance "distance"
   "The column name for recording a distance.")
-(defconst jackel-column-name-time "time"
+(defconst org-fit-column-name-time "time"
   "The column name for recording a time.")
-(defconst jackel-column-name-notes "notes"
+(defconst org-fit-column-name-notes "notes"
   "The column name for recording a time.")
 
-(defconst jackel-set-labels '("warmup" "failure" "drop")
+(defconst org-fit-set-labels '("warmup" "failure" "drop")
   "List of labels that can apply to a given set.")
 
 ;; Workout-mode related
 
-(defvar jackel-workout-heading-marker nil
+(defvar org-fit-workout-heading-marker nil
   "Variable to stor the top-level heading position.
 For example, used to quickly find the item needed to clock in/out of.")
 
-(defvar-local jackel-fold-setting 'hide-other
-  "Stores the auto-folding preference for jackel-workout-mode.
+(defvar-local org-fit-fold-setting 'hide-other
+  "Stores the auto-folding preference for org-fit-workout-mode.
 It can be either the symbols `hide-other' so on only the current
 set/superset is shown or all, to show all exercises.")
-;; TODO: add defcustom  of jackel-default-fold-setting, or document setting default value.
+;; TODO: add defcustom  of org-fit-default-fold-setting, or document setting default value.
 
-(defvar jackel-insert-reference-point nil
+(defvar org-fit-insert-reference-point nil
   "Variable storing the spot where input was last run.
 This is used to auto-clear fields when inputing a number.")
 
-(defvar jackel-workout-mode-timer nil
+(defvar org-fit-workout-mode-timer nil
   "Timer updating various UI of the current active session.")
 
-(defvar jackel-active-workout-name nil
+(defvar org-fit-active-workout-name nil
   "Variable to store the name of the current active routine.")
 
-(defvar jackel-workout-rest-time-history nil
+(defvar org-fit-workout-rest-time-history nil
   "Stores a stack of rest time histories.")
 
-(defvar jackel-workout-rest-time nil
+(defvar org-fit-workout-rest-time nil
   "Cons of the float time when the rest timer started and the target rest time.
 If nil, the rest timer isn't active.")
 
-(defvar jackel-workout-new-data-entered nil
+(defvar org-fit-workout-new-data-entered nil
   "Non-nil if the user has started to edit a blank field.")
 
-(defvar jackel-rest-timer-over-hook '(jackel--rest-over-beep)
+(defvar org-fit-rest-timer-over-hook '(org-fit--rest-over-beep)
   "Functions that run when the rest timer is over.")
 
 
 
 ;;; Org document structure
 
-(defcustom jackel-exercise-routine-files '()
+(defcustom org-fit-exercise-routine-files '()
   "List if files containing exercises and routines.
 All files in this list will be scanned in the following manner:
 
-- Any heading with the property \"JACKEL_EXERCISE_TYPE\" or
-  \"JACKEL_MUSCLE_GROUP\" will be understood to be an exercise
+- Any heading with the property \"ORG_FIT_EXERCISE_TYPE\" or
+  \"ORG_FIT_MUSCLE_GROUP\" will be understood to be an exercise
   definition.
 
-- Any heading with a non-empty \"JACKEL_ROUTINE\" property will
+- Any heading with a non-empty \"ORG_FIT_ROUTINE\" property will
   be understood to be a workout routine.
 
 While you may save workouts in any of the files listed here, they
 can be stored separately."
   :type '(repeat file))
 
-;; (setq jackel-exercise-routine-files '("/Users/zacharyromero/org-workspace/apps/routines.org" "/Users/zacharyromero/dev/emacs/jackel/exercises.org"))
+;; (setq org-fit-exercise-routine-files '("/Users/zacharyromero/org-workspace/apps/routines.org" "/Users/zacharyromero/dev/emacs/org-fit/exercises.org"))
 
-(defcustom jackel-workout-capture-templates '()
+(defcustom org-fit-workout-capture-templates '()
   "Capture location of new workouts.
 The syntax is simmilar to that of `org-capture-templates', taking
 a list of entries.  Each entry is a list with the following items:
@@ -237,41 +237,41 @@ Recognized properties are:
                               (repeat :tag "tags" :inline t
                                       (string :tag "tag")))))))
 
-;; (setq jackel-workout-capture-templates '(("Default" (file "/Users/zacharyromero/org-workspace/apps/workout.org"))))
+;; (setq org-fit-workout-capture-templates '(("Default" (file "/Users/zacharyromero/org-workspace/apps/workout.org"))))
 
-(defun jackel--elt-exercise-p (elt)
+(defun org-fit--elt-exercise-p (elt)
   "Return non-nil if ELT is an exercise element."
-  (or (org-entry-get (org-element-property :begin elt) "JACKEL_MUSCLE_GROUP")
-      (org-entry-get (org-element-property :begin elt) "JACKEL_EXERCISE_TYPE")))
+  (or (org-entry-get (org-element-property :begin elt) "ORG_FIT_MUSCLE_GROUP")
+      (org-entry-get (org-element-property :begin elt) "ORG_FIT_EXERCISE_TYPE")))
 
-(defun jackel-extract-exercises ()
+(defun org-fit-extract-exercises ()
   "Return a list of available exercises."
   (let* ((exercises))
-    (dolist (file jackel-exercise-routine-files)
+    (dolist (file org-fit-exercise-routine-files)
       (with-temp-buffer
         (insert-file-contents file)
         (org-mode)
         (let* ((parse-tree (org-element-parse-buffer)))
           (org-element-map parse-tree 'headline
             (lambda (hl)
-              (when (or (org-entry-get (org-element-property :begin hl) "JACKEL_MUSCLE_GROUP")
-                        (org-entry-get (org-element-property :begin hl) "JACKEL_EXERCISE_TYPE"))
+              (when (or (org-entry-get (org-element-property :begin hl) "ORG_FIT_MUSCLE_GROUP")
+                        (org-entry-get (org-element-property :begin hl) "ORG_FIT_EXERCISE_TYPE"))
                 (push (org-element-property :raw-value hl) exercises)))))))
     (nreverse exercises)))
 
-(defun jackel-extract-routines ()
+(defun org-fit-extract-routines ()
   "Return a list of available routines."
-  (let* ((exercises (jackel-extract-exercises)) ;; TODO - to hashmap?? ;; TODO - error if no exercises
+  (let* ((exercises (org-fit-extract-exercises)) ;; TODO - to hashmap?? ;; TODO - error if no exercises
          (routines)
          (case-fold-search t))
-    (dolist (file jackel-exercise-routine-files)
+    (dolist (file org-fit-exercise-routine-files)
       (with-temp-buffer
         (insert-file-contents file)
         (org-mode)
         (let* ((parse-tree (org-element-parse-buffer)))
           (org-element-map parse-tree 'headline
             (lambda (hl)
-              (when (org-entry-get (org-element-property :begin hl) "JACKEL_ROUTINE")
+              (when (org-entry-get (org-element-property :begin hl) "ORG_FIT_ROUTINE")
                 (let ((parent-name (when-let* ((parent (org-element-lineage hl org-element-all-elements)))
                                      (org-element-property :raw-value parent)))
                       (routine-exercises '()))
@@ -296,14 +296,14 @@ Recognized properties are:
                         routines))))))))
     (nreverse routines)))
 
-(defun jackel-read-exercise ()
+(defun org-fit-read-exercise ()
   "Prompt user to select a known exercise."
-  (let* ((exercises (jackel-extract-exercises)))
-    (completing-read "Exercise: " exercises nil t nil 'jackel-read-exercise)))
+  (let* ((exercises (org-fit-extract-exercises)))
+    (completing-read "Exercise: " exercises nil t nil 'org-fit-read-exercise)))
 
-(defun jackel-read-routine ()
+(defun org-fit-read-routine ()
   "Prompt user to select a known routine."
-  (let* ((routines (jackel-extract-routines))
+  (let* ((routines (org-fit-extract-routines))
          (max-size (apply #'max (seq-map #'length (seq-map #'car routines))))
          (max-parent-name-size (apply #'max (seq-map (lambda (x)
                                                        (length (alist-get 'parent-name (cdr x))))
@@ -321,42 +321,42 @@ Recognized properties are:
                                                        (0 "(empty)")
                                                        (1 "1 exercise")
                                                        (_ (format "%d exercises" exercise-count)))))))))
-    (completing-read "Routine: " routines nil t nil 'jackel-read-routine)))
+    (completing-read "Routine: " routines nil t nil 'org-fit-read-routine)))
 
-(defun jackel--get-exercise-by-name (name)
+(defun org-fit--get-exercise-by-name (name)
   "Return the string of contents of exercise with NAME."
   (catch 'found
-    (dolist (file jackel-exercise-routine-files)
+    (dolist (file org-fit-exercise-routine-files)
       (with-temp-buffer
         (insert-file-contents file)
         (org-mode)
         (while (search-forward name nil t)
           (let* ((hl (org-element-at-point)))
-            (when (and (jackel--elt-exercise-p hl)
+            (when (and (org-fit--elt-exercise-p hl)
                        (string-equal (org-element-property :raw-value hl) name))
               (throw 'found
                      (concat
                       (buffer-substring-no-properties (org-element-property :begin hl) (org-element-property :end hl)) "\n")))))))))
 
-(defun jackel--get-exercise-type (exercise-name)
+(defun org-fit--get-exercise-type (exercise-name)
   "Return the exercise type of exercise name EXERCISE-NAME."
-  (let* ((exercise-data (jackel--get-exercise-by-name exercise-name)))
+  (let* ((exercise-data (org-fit--get-exercise-by-name exercise-name)))
     (with-temp-buffer
       (insert exercise-data)
       (org-mode)
-      (jackel--string-to-exercise-type (or (org-entry-get (point-min) "JACKEL_EXERCISE_TYPE") "weight+reps")))))
+      (org-fit--string-to-exercise-type (or (org-entry-get (point-min) "ORG_FIT_EXERCISE_TYPE") "weight+reps")))))
 
-(defun jackel--get-routine-by-name (name)
+(defun org-fit--get-routine-by-name (name)
   "Return the string of contents of the routine with NAME."
   (catch 'found
-    (dolist (file jackel-exercise-routine-files)
+    (dolist (file org-fit-exercise-routine-files)
       (with-temp-buffer
         (insert-file-contents file)
         (org-mode)
         (let* ((parse-tree (org-element-parse-buffer)))
           (org-element-map parse-tree 'headline
             (lambda (hl)
-              (when (and (org-entry-get (org-element-property :begin hl) "JACKEL_ROUTINE")
+              (when (and (org-entry-get (org-element-property :begin hl) "ORG_FIT_ROUTINE")
                          (string-equal (org-element-property :raw-value hl) name))
                 (throw 'found
                        (concat
@@ -366,7 +366,7 @@ Recognized properties are:
 
 ;;; Units helper functions
 
-(defun jackel--parse-duration (str)
+(defun org-fit--parse-duration (str)
   "Parse a duration string STR into the number of seconds represented."
   (when (string-match "[0-9]+" str)
     (let* ((number (string-to-number (match-string 0 str)))
@@ -385,7 +385,7 @@ Recognized properties are:
                ("hour" 360)))
         number))))
 
-(defun jackel--parse-weight (str)
+(defun org-fit--parse-weight (str)
   "Parse a weight string STR into a cons cell of (AMOUNT . UNIT)."
   (when (string-match "[0-9]+\\(\\.[0-9]+\\)?" str)
     (let* ((number (string-to-number (match-string 0 str)))
@@ -396,23 +396,23 @@ Recognized properties are:
                 (pcase unit
                   ("kg" :kg)
                   ("lb" :lb)))
-        (cons number jackel-default-unit)))))
+        (cons number org-fit-default-unit)))))
 
-(defun jackel--parse (str type)
+(defun org-fit--parse (str type)
   (pcase type
     ('reps (string-to-number str))
-    ('weight (jackel--parse-weight str))
-    ('time (jackel--parse-duration str))
+    ('weight (org-fit--parse-weight str))
+    ('time (org-fit--parse-duration str))
     ('distance (error "Not implemented"))
     ('notes str)))
 
-(defun jackel--read-weight (&optional prompt)
+(defun org-fit--read-weight (&optional prompt)
   "Prompt the user to input a weight.
 If PROMPT is a string use that as the prompt."
-  (let ((weight (read-number (format "%s (%s): " (or prompt "Weight") jackel-default-unit))))
-    (cons weight jackel-default-unit)))
+  (let ((weight (read-number (format "%s (%s): " (or prompt "Weight") org-fit-default-unit))))
+    (cons weight org-fit-default-unit)))
 
-(defun jackel--weight-to-string (weight)
+(defun org-fit--weight-to-string (weight)
   "Return a string representing WEIGHT."
   (let*  ((clean-float-func (lambda (x)
                               (if (or (integerp x) (and (floatp x) (= (mod x 1) 0)))
@@ -425,18 +425,18 @@ If PROMPT is a string use that as the prompt."
        (format "%s%s" (funcall clean-float-func amt) (alist-get unit unit-to-string)))
       ((cl-type null) "")
       (amt
-       (format "%s%s" (funcall clean-float-func amt) (alist-get jackel-default-unit unit-to-string))))))
+       (format "%s%s" (funcall clean-float-func amt) (alist-get org-fit-default-unit unit-to-string))))))
 
-(defun jackel--value-to-string (val)
+(defun org-fit--value-to-string (val)
   "Return a string representing VAL.
 Value can be a united number or a plain number."
   (cond
    ((numberp val) (format "%s" val))
    ((consp val)
     ;; TODO - this will need to change when durations and time are added.
-    (jackel--weight-to-string val))))
+    (org-fit--weight-to-string val))))
 
-(defun jackel--round-to-nearest (weight nearest)
+(defun org-fit--round-to-nearest (weight nearest)
   "Round WEIGHT to the closest multiple of NEAREST."
   (cond
    ((consp weight)
@@ -447,7 +447,7 @@ Value can be a united number or a plain number."
    ((numberp weight)
     (* (round (/ weight nearest) ) nearest))))
 
-(defun jackel--* (a b)
+(defun org-fit--* (a b)
   "Multiply a weight A by a scalar amount B.
 Arguments may be reversed."
   (cond
@@ -458,14 +458,14 @@ Arguments may be reversed."
                 (`(,scalar2 . ,unit2) b))
       (cons (* scalar1 scalar2) `(* ,unit1 ,unit2))))
    ((consp b)
-    (jackel--* b a))
+    (org-fit--* b a))
    ((and (numberp a) (numberp b))
     (* a b))
    (t
     (pcase-let ((`(,weight . ,unit) a))
       (cons (* weight b) unit)))))
 
-(defun jackel--convert (val to-type)
+(defun org-fit--convert (val to-type)
   (let* ((raw-val (car val)))
     (cons
      (pcase (list (cdr val) to-type)
@@ -473,7 +473,7 @@ Arguments may be reversed."
        (`(:lb :kg) (* raw-val 0.453592)))
      to-type)))
 
-(defun jackel--reduce (op &rest items)
+(defun org-fit--reduce (op &rest items)
   "Multiply a weight A by a scalar amount B.
 Arguments may be reversed."
   (seq-reduce
@@ -486,7 +486,7 @@ Arguments may be reversed."
       ((and (consp acc) (consp elt))
        (if (equal (cdr acc) (cdr elt))
            (cons (funcall op (car acc) (car elt)) (cdr acc))
-         (let ((converted-elt (jackel--convert elt (cdr acc))))
+         (let ((converted-elt (org-fit--convert elt (cdr acc))))
            (cons (funcall op (car acc) (car converted-elt)) (cdr acc)))))
       ((or (consp elt) (consp acc))
        (error "enable to add values of two different types"))
@@ -494,73 +494,73 @@ Arguments may be reversed."
    (cdr items)
    (car items)))
 
-(defun jackel--+ (&rest items)
+(defun org-fit--+ (&rest items)
   "Multiply a weight A by a scalar amount B.
 Arguments may be reversed."
-  (apply #'jackel--reduce (append '(+) items)))
+  (apply #'org-fit--reduce (append '(+) items)))
 
-(defun jackel--max (&rest items)
+(defun org-fit--max (&rest items)
   "Multiply a weight A by a scalar amount B.
 Arguments may be reversed."
-  (apply #'jackel--reduce (append '(max) items)))
+  (apply #'org-fit--reduce (append '(max) items)))
 
-(defun jackel--move-up-to-workout ()
+(defun org-fit--move-up-to-workout ()
   "Move the point up to the top-level definition of a workout."
   (catch 'done
     (while t
       (let ((at-elt (org-element-at-point)))
         (when (and (eql (org-element-type at-elt) 'headline)
-                   (alist-get "JACKEL_WORKOUT_ROUTINE" (org-entry-properties) nil nil 'equal))
+                   (alist-get "ORG_FIT_WORKOUT_ROUTINE" (org-entry-properties) nil nil 'equal))
           (throw 'done nil))
         (org-up-element)))))
 
-(defun jackel-table-to-lisp (&optional txt)
+(defun org-fit-table-to-lisp (&optional txt)
   "Convert a table to a list of plists representing the sets of an exercise."
   (let* ((data (org-table-to-lisp txt))
-         (col-types (seq-map #'jackel--column-name-to-type (car data))))
+         (col-types (seq-map #'org-fit--column-name-to-type (car data))))
     (seq-map (lambda (row)
                (apply #'append
                 (seq-mapn
                  (lambda (str type)
                    (cond
                     ((eql type 'notes)
-                     (let* ((target (jackel--extract-table-from-note str)))
+                     (let* ((target (org-fit--extract-table-from-note str)))
                        (list 'notes str 'target target)))
-                    (t (list type (jackel--parse str type)))))
+                    (t (list type (org-fit--parse str type)))))
                  row col-types)))
              (cddr data))))
 
-(defun jackel-row-to-lisp ()
+(defun org-fit-row-to-lisp ()
   "Return a list representation of the current row."
   (let* ((line (org-table-current-line))
-         (col1 (jackel--column-name-to-type (org-table-get 1 1)))
-         (col1-val (jackel--parse (org-table-get line 1) col1))
-         (col2 (jackel--column-name-to-type (org-table-get 1 2)))
-         (col2-val (jackel--parse (org-table-get line 2) col2))
-         (col3 (jackel--column-name-to-type (org-table-get 1 3)))
+         (col1 (org-fit--column-name-to-type (org-table-get 1 1)))
+         (col1-val (org-fit--parse (org-table-get line 1) col1))
+         (col2 (org-fit--column-name-to-type (org-table-get 1 2)))
+         (col2-val (org-fit--parse (org-table-get line 2) col2))
+         (col3 (org-fit--column-name-to-type (org-table-get 1 3)))
          (ret (list col1 col1-val
                     col2 col2-val)))
     (when col3
-      (setq ret (append ret (list col3 (jackel--parse (org-table-get line 3) col3)))))
+      (setq ret (append ret (list col3 (org-fit--parse (org-table-get line 3) col3)))))
     (when-let* ((note (plist-get ret 'notes))
-                (target (jackel--extract-table-from-note note)))
+                (target (org-fit--extract-table-from-note note)))
       (setq ret (append ret (list 'target target))))
     ret))
 
-(defun jackel-put-row (col-type val-str)
+(defun org-fit-put-row (col-type val-str)
   "Write VAL-STR to the column of type COL-TYPE."
   (let* ((col-no (cl-loop for col from 1 to 3
-                          if (eql col-type (jackel--column-name-to-type (org-table-get 1 col)))
+                          if (eql col-type (org-fit--column-name-to-type (org-table-get 1 col)))
                           return col)))
     (org-table-put (org-table-current-line) col-no val-str t)))
 
 
 ;;; Exercises
 
-(defun jackel--exercise-body (exercise-name)
+(defun org-fit--exercise-body (exercise-name)
   "Find and return body of definition for EXERCISE-NAME."
   (catch 'done
-    (dolist (file jackel-exercise-routine-files)
+    (dolist (file org-fit-exercise-routine-files)
       (with-temp-buffer
         (insert-file-contents file)
         (org-mode)
@@ -578,7 +578,7 @@ Arguments may be reversed."
                                                        (org-element-property :contents-end hl)))))))))))
 
 
-(defun jackel--string-to-exercise-type (str)
+(defun org-fit--string-to-exercise-type (str)
   "Given an string STR return list of input column types."
   ;; "weight+reps\", \"distance+time\", \"reps\", \"time\", or \"weight+time\"
   (pcase str
@@ -591,40 +591,40 @@ Arguments may be reversed."
 
 ;;; Routines
 
-(defun jackel--column-type-to-name (type)
+(defun org-fit--column-type-to-name (type)
   "Return the column name of a given column TYPE."
   (pcase type
-    ('weight jackel-column-name-weight)
-    ('reps jackel-column-name-reps)
-    ('distance jackel-column-name-distance)
-    ('time jackel-column-name-time)
-    ('notes jackel-column-name-notes)))
+    ('weight org-fit-column-name-weight)
+    ('reps org-fit-column-name-reps)
+    ('distance org-fit-column-name-distance)
+    ('time org-fit-column-name-time)
+    ('notes org-fit-column-name-notes)))
 
-(defun jackel--column-name-to-type (name)
+(defun org-fit--column-name-to-type (name)
   "Return the column type symbol of a given column NAME."
   (let ((name (downcase name)))
     (cond
-     ((equal name jackel-column-name-weight) 'weight)
-     ((equal name jackel-column-name-reps) 'reps)
-     ((equal name jackel-column-name-distance) 'distance)
-     ((equal name jackel-column-name-time) 'time)
-     ((equal name jackel-column-name-notes) 'notes))))
+     ((equal name org-fit-column-name-weight) 'weight)
+     ((equal name org-fit-column-name-reps) 'reps)
+     ((equal name org-fit-column-name-distance) 'distance)
+     ((equal name org-fit-column-name-time) 'time)
+     ((equal name org-fit-column-name-notes) 'notes))))
 
-(defun jackel--insert-blank-exercise-table (type)
+(defun org-fit--insert-blank-exercise-table (type)
   "Insert a blank exercise table according to TYPE."
   (insert "| ")
   (dolist (type-elt type)
     (pcase type-elt
       ('weight
-       (insert jackel-column-name-weight))
+       (insert org-fit-column-name-weight))
       ('reps
-       (insert jackel-column-name-reps))
+       (insert org-fit-column-name-reps))
       ('time
-       (insert jackel-column-name-time))
+       (insert org-fit-column-name-time))
       ('distance
-       (insert jackel-column-name-distance)))
+       (insert org-fit-column-name-distance)))
     (insert " | "))
-  (insert jackel-column-name-notes " |\n")
+  (insert org-fit-column-name-notes " |\n")
   (if (= (length type) 2)
       (insert "|-+-+-|\n| | | |\n")
     (insert "|-+-|\n| | |\n"))
@@ -634,39 +634,39 @@ Arguments may be reversed."
 
 ;;; Interactive Commands (for routines):
 
-(defun jackel-routine-insert-exercise (exercise-name)
+(defun org-fit-routine-insert-exercise (exercise-name)
   "Insert a known exercise EXERCISE-NAME after the current point."
-  (interactive (list (jackel-read-exercise)))
-  (jackel-workout-add-exercise exercise-name))
+  (interactive (list (org-fit-read-exercise)))
+  (org-fit-workout-add-exercise exercise-name))
 
 
 
 ;;; History
 
-(defun jackel--workout-files ()
+(defun org-fit--workout-files ()
   "Return list of files which contain workouts."
   (let ((files))
-    (pcase-dolist (`(,_desc (,type ,f . ,_rest)) jackel-workout-capture-templates)
+    (pcase-dolist (`(,_desc (,type ,f . ,_rest)) org-fit-workout-capture-templates)
       (when (member type '(file file+headline file+olp))
         (push f files)))
     (nreverse files)))
 
-(defun jackel--scan-past-workout-routines (routine-name)
+(defun org-fit--scan-past-workout-routines (routine-name)
   "Scan all workouts for routines of ROUTINE-NAME."
   (let ((case-fold-search t)
         (results))
-    (dolist (workout-file (jackel--workout-files))
+    (dolist (workout-file (org-fit--workout-files))
       (with-temp-buffer
         (insert-file-contents workout-file)
         (org-mode)
         (goto-char (point-min))
-        (while (search-forward-regexp (concat ":JACKEL_WORKOUT_ROUTINE:.*"
+        (while (search-forward-regexp (concat ":ORG_FIT_WORKOUT_ROUTINE:.*"
                                               (regexp-quote routine-name))
                                       nil t)
           (let ((date)
                 (routine-text))
             (save-excursion
-              (jackel--move-up-to-workout)
+              (org-fit--move-up-to-workout)
               (let* ((heading (org-get-heading)))
                 (save-match-data
                   (string-match org-element--timestamp-regexp heading)
@@ -682,11 +682,11 @@ Arguments may be reversed."
                  #'string>
                  results)))
 
-(defun jackel--scan-past-workout-exercises (exercise-name)
+(defun org-fit--scan-past-workout-exercises (exercise-name)
   "Scan all workouts for exercises of EXERCISE-NAME."
   (let ((case-fold-search t)
         (results))
-    (dolist (workout-file (jackel--workout-files))
+    (dolist (workout-file (org-fit--workout-files))
       (with-temp-buffer
         (insert-file-contents workout-file)
         (org-mode)
@@ -695,7 +695,7 @@ Arguments may be reversed."
           (let ((date)
                 (exercise-table))
             (save-excursion
-              (jackel--move-up-to-workout)
+              (org-fit--move-up-to-workout)
               (let* ((heading (org-get-heading)))
                 (save-match-data
                   (string-match org-element--timestamp-regexp heading)
@@ -704,7 +704,7 @@ Arguments may be reversed."
               (save-restriction
                 (org-narrow-to-subtree)
                 (when (search-forward-regexp org-table-line-regexp nil t)
-                  (setq exercise-table (jackel-table-to-lisp)))))
+                  (setq exercise-table (org-fit-table-to-lisp)))))
             (when exercise-table
               (push `((date . ,date)
                       (data . ,exercise-table))
@@ -725,143 +725,143 @@ Arguments may be reversed."
 
 ;; Lombardi’s formula is weight × reps ^ 0.1.
 
-(defun jackel--table-volume (table-data)
+(defun org-fit--table-volume (table-data)
   "Calculate the volume from TABLE-DATA."
   (apply
-   #'jackel--+
+   #'org-fit--+
    (seq-map
     (lambda (row)
       (let ((weight (plist-get row 'weight))
             (reps (plist-get row 'reps)))
         (when (and weight reps)
-          (jackel--* weight reps))))
+          (org-fit--* weight reps))))
     table-data)))
 
-(defun jackel--table-1rm-row (table-data)
+(defun org-fit--table-1rm-row (table-data)
   "Return row data of best 1rm from TABLE-DATA."
   (let ((1rm-to-row (make-hash-table :test #'equal))
         (best-1rm))
     (setq best-1rm
           (apply
-           #'jackel--max
+           #'org-fit--max
            (seq-map
             (lambda (row)
               (let* ((weight (plist-get row 'weight))
                      (reps (plist-get row 'reps)))
                 (when (and weight reps)
-                  (let* ((1rm (funcall jackel-1rm-function weight reps)))
+                  (let* ((1rm (funcall org-fit-1rm-function weight reps)))
                     (puthash 1rm (list weight reps) 1rm-to-row)
                     1rm))))
             table-data)))
     (gethash best-1rm 1rm-to-row)))
 
-(defun jackel--table-1rm (table-data)
+(defun org-fit--table-1rm (table-data)
   "Calculate the best 1RM from TABLE-DATA."
   (apply
-   #'jackel--max
+   #'org-fit--max
    (seq-map
     (lambda (row)
       (let ((weight (plist-get row 'weight))
             (reps (plist-get row 'reps)))
-        (funcall jackel-1rm-function weight reps)))
+        (funcall org-fit-1rm-function weight reps)))
     table-data)))
 
-(defun jackel--table-best-set-volume (table-data)
+(defun org-fit--table-best-set-volume (table-data)
   "Calculate the best 1RM from TABLE-DATA."
   (apply
-   #'jackel--max
+   #'org-fit--max
    (seq-map
     (lambda (row)
       (let ((weight (plist-get row 'weight))
             (reps (plist-get row 'reps)))
-        (jackel--* weight reps)))
+        (org-fit--* weight reps)))
     table-data)))
 
-(defun jackel--1rm-brzycki (weight reps)
-  (jackel--* weight (/ 1.0 (- 1.0278 (* 0.0278 reps)))))
+(defun org-fit--1rm-brzycki (weight reps)
+  (org-fit--* weight (/ 1.0 (- 1.0278 (* 0.0278 reps)))))
 
-(defun jackel--1rm-epley (weight reps)
+(defun org-fit--1rm-epley (weight reps)
   (if (= 1 reps)
       weight
-    (jackel--* weight (+ 1.0 (/ reps 30.0)))))
+    (org-fit--* weight (+ 1.0 (/ reps 30.0)))))
 
-(defun jackel--1rm-lander (weight reps)
-  (jackel--* (jackel--* 100 weight)
+(defun org-fit--1rm-lander (weight reps)
+  (org-fit--* (org-fit--* 100 weight)
              (/ 1.0 (- 101.3 (* 2.67123 reps)))))
 
 
 
 ;;; Workouts
 
-(defun jackel--get-rest-time ()
+(defun org-fit--get-rest-time ()
   "Return the specified rest time at the current point."
-  (let* ((rest-str (org-entry-get (point) jackel-autorest-property-name)))
+  (let* ((rest-str (org-entry-get (point) org-fit-autorest-property-name)))
     (when rest-str
-      (jackel--parse-duration rest-str))))
+      (org-fit--parse-duration rest-str))))
 
-(defun jackel--make-note (val type)
+(defun org-fit--make-note (val type)
   "Return string representation of VAL having meaning TYPE."
   (unless (string-blank-p val)
     (pcase type
       ('reps (format "x%s" val))
-      ('weight (jackel--weight-to-string (jackel--parse-weight val))))))
+      ('weight (org-fit--weight-to-string (org-fit--parse-weight val))))))
 
-(defun jackel--remove-plan-note (note)
+(defun org-fit--remove-plan-note (note)
   "Remotve workout plan section of NOTE if exits.
 Workout plan is the first semicolon separated section of a note
 that contains direction what should be filled in the table."
 
   (let* ((parts (string-split note ";" )))
-    (if (jackel--plan-note-p  (car parts))
+    (if (org-fit--plan-note-p  (car parts))
         (string-join (cdr parts) "")
       note)))
 
-(defun jackel--routine-set-to-note (line)
+(defun org-fit--routine-set-to-note (line)
   "Blank out table LINE number and store it in notes."
-  (let* ((col1 (jackel--column-name-to-type (org-table-get 1 1)))
-         (col2 (jackel--column-name-to-type (org-table-get 1 2)))
-         (_col3 (jackel--column-name-to-type (org-table-get 1 3))))
-    (let* ((two-input-table-p (equal (jackel--table-current-column-type 3) 'notes)))
+  (let* ((col1 (org-fit--column-name-to-type (org-table-get 1 1)))
+         (col2 (org-fit--column-name-to-type (org-table-get 1 2)))
+         (_col3 (org-fit--column-name-to-type (org-table-get 1 3))))
+    (let* ((two-input-table-p (equal (org-fit--table-current-column-type 3) 'notes)))
       (if two-input-table-p
-          (let* ((note1 (jackel--make-note (org-table-get line 1) col1))
-               (note2 (jackel--make-note (org-table-get line 2) col2))
+          (let* ((note1 (org-fit--make-note (org-table-get line 1) col1))
+               (note2 (org-fit--make-note (org-table-get line 2) col2))
                (note (concat note1 " " note2))
-               (old-note (jackel--remove-plan-note (org-table-get line 3)))
+               (old-note (org-fit--remove-plan-note (org-table-get line 3)))
                (new-note (if (string-blank-p old-note)
                              note
                            (concat note "; " old-note))))
           (org-table-put line 1 "")
           (org-table-put line 2 "")
           (org-table-put line 3 new-note))
-        (let* ((note (jackel--make-note (org-table-get line 1) col1))
-                 (old-note (jackel--remove-plan-note (org-table-get line 2)))
+        (let* ((note (org-fit--make-note (org-table-get line 1) col1))
+                 (old-note (org-fit--remove-plan-note (org-table-get line 2)))
                  (new-note (if (string-blank-p old-note)
                                note
                              (concat note "; " old-note))))
             (org-table-put line 2 new-note)
             (org-table-put line 1 ""))))))
 
-(defun jackel--routine-sets-to-notes (routine-str)
+(defun org-fit--routine-sets-to-notes (routine-str)
   "Move all inputted data to notes section for ROUTINE-STR.
 Routine definitions are meant to store the templates of workouts
 so data shoudln't be entered in the non-last columns for
 routines.  If this is done, this function is to take that data
 and move it to the notes section in a way that is understandable
-by the command `jackel-fill-in'."
+by the command `org-fit-fill-in'."
   (with-temp-buffer
     (insert routine-str)
     (org-mode)
     (goto-char (point-min))
-    (while (search-forward (concat "| " jackel-column-name-notes) nil t)
+    (while (search-forward (concat "| " org-fit-column-name-notes) nil t)
         (org-table-analyze)
         (let* ((line-ct (- (length org-table-dlines) 2)))
           (cl-loop for line from 2 to (1+ line-ct)
                    do
-                   (jackel--routine-set-to-note line)))
+                   (org-fit--routine-set-to-note line)))
         (org-table-align))
     (buffer-string)))
 
-(defun jackel--routine-string-to-workout (routine)
+(defun org-fit--routine-string-to-workout (routine)
   "Convert a ROUTINE string to a workout entry."
   (let ((case-fold-search t))
     (with-temp-buffer
@@ -879,7 +879,7 @@ by the command `jackel-fill-in'."
             (when (re-search-forward ":END:" nil t)
               (delete-region start (pos-eol))))))
       (save-excursion
-        (while (search-forward ":jackel_routine:" nil t)
+        (while (search-forward ":org-fit_routine:" nil t)
           (delete-region (1- (pos-bol)) (pos-eol))))
       (while (not (looking-at org-heading-regexp))
         (forward-line t))
@@ -891,25 +891,25 @@ by the command `jackel-fill-in'."
                (hl-name (org-element-property :raw-value hl-elt)))
           (search-forward hl-name)
           (replace-match (concat hl-name " " (format-time-string "[%Y-%m-%d %a]")))
-          (org-set-property "JACKEL_WORKOUT_ROUTINE" hl-name)))
+          (org-set-property "ORG_FIT_WORKOUT_ROUTINE" hl-name)))
       (buffer-string))))
 
-(defun jackel--capture-new-workout (routine-string)
+(defun org-fit--capture-new-workout (routine-string)
   "Create new workout entry according to contents of ROUTINE-STRING."
   ;;; org-capture-goto-target
   (let* ((selected-template
-          (if (= (length jackel-workout-capture-templates) 1)
-              (car jackel-workout-capture-templates)
+          (if (= (length org-fit-workout-capture-templates) 1)
+              (car org-fit-workout-capture-templates)
             (let ((selected (completing-read
                              "Workout capture: "
-                             (seq-map #'car jackel-workout-capture-templates)
+                             (seq-map #'car org-fit-workout-capture-templates)
                              nil
                              t)))
               (seq-find (pcase-lambda (`(,desc ,_))
                           (equal desc selected))
-                        jackel-workout-capture-templates))))
-         (workout-contents (jackel--routine-sets-to-notes
-                            (jackel--routine-string-to-workout
+                        org-fit-workout-capture-templates))))
+         (workout-contents (org-fit--routine-sets-to-notes
+                            (org-fit--routine-string-to-workout
                              routine-string)))
          ;; TODO: if more than one, prompt user
          (org-capture-entry `("t" "" entry ,(cadr selected-template)
@@ -918,97 +918,97 @@ by the command `jackel-fill-in'."
     (org-capture)
     (org-capture '(16))))
 
-(defun jackel--set-workout-to-active ()
-  "Find the workout of the point and make it active, enabling jackel-workout-mode."
+(defun org-fit--set-workout-to-active ()
+  "Find the workout of the point and make it active, enabling org-fit-workout-mode."
   ;; TODO: catch error and print nicer message
-  (jackel--move-up-to-workout)
-  (let* ((workout-name (alist-get "JACKEL_WORKOUT_ROUTINE" (org-entry-properties) nil nil 'equal))
+  (org-fit--move-up-to-workout)
+  (let* ((workout-name (alist-get "ORG_FIT_WORKOUT_ROUTINE" (org-entry-properties) nil nil 'equal))
          (workout-marker (make-marker)))
     (org-clock-in)
     (set-marker workout-marker (point))
-    (setq jackel-workout-heading-marker workout-marker)
+    (setq org-fit-workout-heading-marker workout-marker)
     (org-narrow-to-subtree)
-    (setq jackel-active-workout-name workout-name)
-    (jackel-workout-mode 1)))
+    (setq org-fit-active-workout-name workout-name)
+    (org-fit-workout-mode 1)))
 
-(defvar jackel-workout-mode-map
+(defvar org-fit-workout-mode-map
   (let ((map (make-keymap)))
     (suppress-keymap map t)
 
-    (keymap-set map "?" #'jackel-workout-help)
+    (keymap-set map "?" #'org-fit-workout-help)
 
     ;; Movement and Viewing
-    (keymap-set map "<tab>" #'jackel-workout-next-empty-field)
-    (keymap-set map "<backtab>" #'jackel-workout-previous-empty-field)
+    (keymap-set map "<tab>" #'org-fit-workout-next-empty-field)
+    (keymap-set map "<backtab>" #'org-fit-workout-previous-empty-field)
 
-    (keymap-set map "<up>" #'jackel-workout-up-field)
-    (keymap-set map "<down>" #'jackel-workout-down-field)
-    (keymap-set map "<left>" #'jackel-workout-left-field)
-    (keymap-set map "<right>" #'jackel-workout-right-field)
+    (keymap-set map "<up>" #'org-fit-workout-up-field)
+    (keymap-set map "<down>" #'org-fit-workout-down-field)
+    (keymap-set map "<left>" #'org-fit-workout-left-field)
+    (keymap-set map "<right>" #'org-fit-workout-right-field)
 
-    (keymap-set map "p" #'jackel-workout-up-field)
-    (keymap-set map "n" #'jackel-workout-down-field)
-    (keymap-set map "f" #'jackel-workout-left-field)
-    (keymap-set map "b" #'jackel-workout-right-field)
+    (keymap-set map "p" #'org-fit-workout-up-field)
+    (keymap-set map "n" #'org-fit-workout-down-field)
+    (keymap-set map "f" #'org-fit-workout-left-field)
+    (keymap-set map "b" #'org-fit-workout-right-field)
 
-    (keymap-set map "<mouse-1>" #'jackel-set-point)
+    (keymap-set map "<mouse-1>" #'org-fit-set-point)
 
     ;; Set Management
-    (keymap-set map "+" #'jackel-workout-add-set)
-    (keymap-set map "-" #'jackel-workout-remove-set)
-    (keymap-set map "'" #'jackel-workout-add-note)
-    (keymap-set map "W" #'jackel-workout-add-warmup-set)
+    (keymap-set map "+" #'org-fit-workout-add-set)
+    (keymap-set map "-" #'org-fit-workout-remove-set)
+    (keymap-set map "'" #'org-fit-workout-add-note)
+    (keymap-set map "W" #'org-fit-workout-add-warmup-set)
     (keymap-set map "e" #'org-table-edit-field)
     (keymap-set map "x" #'org-table-blank-field)
-    (keymap-set map ">" #'jackel-stash-set)
-    (keymap-set map "t" #'jackel-workout-set-type)
+    (keymap-set map ">" #'org-fit-stash-set)
+    (keymap-set map "t" #'org-fit-workout-set-type)
 
     ;; Exercise Management
-    (keymap-set map "E" #'jackel-workout-add-exercise)
-    (keymap-set map "D" #'jackel-workout-remove-exercise)
-    (keymap-set map "S" #'jackel-workout-swap-exercise)
-    (keymap-set map "i" #'jackel-workout-info-dwim)
-    (keymap-set map "v" #'jackel-workout-toggle-view)
+    (keymap-set map "E" #'org-fit-workout-add-exercise)
+    (keymap-set map "D" #'org-fit-workout-remove-exercise)
+    (keymap-set map "S" #'org-fit-workout-swap-exercise)
+    (keymap-set map "i" #'org-fit-workout-info-dwim)
+    (keymap-set map "v" #'org-fit-workout-toggle-view)
 
     (keymap-set map "S-<up>" #'org-move-subtree-up)
     (keymap-set map "S-<down>" #'org-move-subtree-down)
 
     ;; Data Entry
-    (keymap-set map "u" #'jackel-workout-convert-unit)
-    (keymap-set map "<spc>" #'jackel-fill-in)
-    (keymap-set map "<SPC>" #'jackel-fill-in)
-    (keymap-set map "\"" #'jackel-workout-ditto) ;; something more native?
-    (keymap-set map "<volume-down>" #'jackel-fill-in-and-next-empty-field)
-    (keymap-set map "<volume-up>" #'jackel-edit-and-next-empty-field)
+    (keymap-set map "u" #'org-fit-workout-convert-unit)
+    (keymap-set map "<spc>" #'org-fit-fill-in)
+    (keymap-set map "<SPC>" #'org-fit-fill-in)
+    (keymap-set map "\"" #'org-fit-workout-ditto) ;; something more native?
+    (keymap-set map "<volume-down>" #'org-fit-fill-in-and-next-empty-field)
+    (keymap-set map "<volume-up>" #'org-fit-edit-and-next-empty-field)
 
     (dotimes (i 10)
-      (keymap-set map (string (+ ?0 i)) #'jackel-self-insert-command))
-    (keymap-set map "." #'jackel-self-insert-command)
+      (keymap-set map (string (+ ?0 i)) #'org-fit-self-insert-command))
+    (keymap-set map "." #'org-fit-self-insert-command)
 
     ;; Session Management
-    (keymap-set map "r" #'jackel-workout-rest)
-    (keymap-set map "C-c r" #'jackel-workout-rest-pop)
-    (keymap-set map "R" #'jackel-workout-rest)
-    (keymap-set map "P" #'jackel-workout-pause-start-session)
-    (keymap-set map "Q" #'jackel-workout-quit)
+    (keymap-set map "r" #'org-fit-workout-rest)
+    (keymap-set map "C-c r" #'org-fit-workout-rest-pop)
+    (keymap-set map "R" #'org-fit-workout-rest)
+    (keymap-set map "P" #'org-fit-workout-pause-start-session)
+    (keymap-set map "Q" #'org-fit-workout-quit)
     (keymap-set map "U" #'undo)
 
     map)
-  "Mode map for `jackel-workout-mode'.")
+  "Mode map for `org-fit-workout-mode'.")
 
-(defun jackel--table-current-column-type (&optional column)
+(defun org-fit--table-current-column-type (&optional column)
   "Return the string of the first row of the current column.
 If COLUMN is a number, use it instead of the current column."
   (let ((current-column (or column (org-table-current-column))))
     (when (> current-column 0) ;; we are in a table
-      (jackel--column-name-to-type (org-table-get 1 current-column)))))
+      (org-fit--column-name-to-type (org-table-get 1 current-column)))))
 
-(defun jackel--line-note (&optional input-section)
+(defun org-fit--line-note (&optional input-section)
   "Return the note string for the current line.
 If INPUT-SECTION is non-nil, get the first semicolon delimited text."
   ;; TODO: This could be done more stabily by checking for column names.
   (let* ((current-line (org-table-current-line))
-         (two-input-table-p (equal (jackel--table-current-column-type 3) 'notes))
+         (two-input-table-p (equal (org-fit--table-current-column-type 3) 'notes))
          (col3-data (org-table-get current-line 3))
          (res (if two-input-table-p
                   col3-data
@@ -1017,17 +1017,17 @@ If INPUT-SECTION is non-nil, get the first semicolon delimited text."
         (car (string-split res ";"))
       res)))
 
-(defun jackel--on-set-line ()
+(defun org-fit--on-set-line ()
   "Return non-nil if the point is on a line for inputing set data."
   (and (org-at-table-p)
        (> (org-table-current-line) 1)))
 
-(defun jackel--target-weight-of-set (&optional note)
+(defun org-fit--target-weight-of-set (&optional note)
   "Return weight specification.
 If NOTE is a string, use that instead of getting the current line's cell."
-  (when (and (not note) (not (jackel--on-set-line)))
+  (when (and (not note) (not (org-fit--on-set-line)))
     (error "No set on current line"))
-  (let* ((note-text (or note (jackel--line-note t))))
+  (let* ((note-text (or note (org-fit--line-note t))))
     (cond
      ((string-match "\\([1-9][0-9]*\\(?:\\.[0-9]*\\)?\\)\\(kg\\|lb\\)" note-text)
       (let* ((weight (match-string 1 note-text))
@@ -1039,20 +1039,20 @@ If NOTE is a string, use that instead of getting the current line's cell."
      ;; unitless string at beginning of note
      ((string-match "\\`\\([1-9][0-9]*\\(?:\\.[0-9]*\\)?\\)\\(?:[^0-9]\\|$\\)" note-text)
       (let* ((weight (match-string 1 note-text)))
-        (cons (string-to-number weight) jackel-default-unit))))))
+        (cons (string-to-number weight) org-fit-default-unit))))))
 
-(defun jackel--target-reps-of-set (&optional note)
+(defun org-fit--target-reps-of-set (&optional note)
   "Return weight specification.
 If NOTE is a string, use that instead of getting the current line's cell."
-  (when (and (not note) (not (jackel--on-set-line)))
+  (when (and (not note) (not (org-fit--on-set-line)))
     (error "No set on current line"))
-  (let* ((note-text (or note (jackel--line-note t))))
+  (let* ((note-text (or note (org-fit--line-note t))))
     (cond
      ((string-match "x ?\\([1-9][0-9]*\\)" note-text)
       (let* ((reps (match-string 1 note-text)))
         (string-to-number reps))))))
 
-(defun jackel--plan-note-p (note)
+(defun org-fit--plan-note-p (note)
   "Return non-nil if NOTE is a plan.
 A plan is a special note that indicates how the user intends to complete a set."
   ;; TODO this is a hackey way to determine this but it seems like it
@@ -1065,11 +1065,11 @@ A plan is a special note that indicates how the user intends to complete a set."
 
 ;; TODO: time spec of MM:SS or HH:MM:SS or min s sec h hour second minute
 ;; TODO: distance spec of mi, km, m, ft, cm, or in.
-(defun jackel--extract-table-from-note (&optional note)
+(defun org-fit--extract-table-from-note (&optional note)
   "Return a preset value alist of notes column of current line."
   (when (> (org-table-current-line) 1)
-    (let* ((maybe-reps (jackel--target-reps-of-set note))
-           (maybe-weight (jackel--target-weight-of-set note))
+    (let* ((maybe-reps (org-fit--target-reps-of-set note))
+           (maybe-weight (org-fit--target-weight-of-set note))
            (res))
       (when maybe-reps
         (push (cons 'reps maybe-reps) res))
@@ -1078,11 +1078,11 @@ A plan is a special note that indicates how the user intends to complete a set."
       (or res
           (save-excursion
             (org-table-goto-line (1- (org-table-current-line)))
-            (jackel--extract-table-from-note))))))
+            (org-fit--extract-table-from-note))))))
 
-(defun jackel--apply-fold-setting ()
-  "Assuming buffer is unfolded, apply fold settings of `jackel-fold-setting'."
-  (pcase jackel-fold-setting
+(defun org-fit--apply-fold-setting ()
+  "Assuming buffer is unfolded, apply fold settings of `org-fit-fold-setting'."
+  (pcase org-fit-fold-setting
     ('all nil)
     ('hide-other
      (let* ((pos (point)))
@@ -1090,7 +1090,7 @@ A plan is a special note that indicates how the user intends to complete a set."
        (org-reveal)
        (goto-char pos)))))
 
-(defun jackel--current-table-complete ()
+(defun org-fit--current-table-complete ()
   "Return non-nil if the current table at point is all filled in."
   (when (and (org-at-table-p))
     (thread-last (seq-drop (org-table-to-lisp) 2)
@@ -1098,23 +1098,23 @@ A plan is a special note that indicates how the user intends to complete a set."
                  (flatten-list)
                  (seq-every-p (lambda (x) (not (string-blank-p x)))))))
 
-(defun jackel--process-table-changes ()
+(defun org-fit--process-table-changes ()
   "Process new table state e.g. marking exercise DONE or starting rest timer."
-  (when jackel-workout-new-data-entered
+  (when org-fit-workout-new-data-entered
     ;; Auto-restart rest timer
     (when-let* ((two-column-input (and (org-at-table-p)
-                                       (equal (jackel--table-current-column-type 3) 'notes)))
+                                       (equal (org-fit--table-current-column-type 3) 'notes)))
                 (complete (if two-column-input
                               (and (not (string-blank-p (org-table-get (org-table-current-line) 1)))
                                    (not (string-blank-p (org-table-get (org-table-current-line) 2))))
                             (not (string-blank-p (org-table-get (org-table-current-line) 1))))))
-      (jackel--start-rest-timer  (jackel--get-rest-time)))
+      (org-fit--start-rest-timer  (org-fit--get-rest-time)))
 
     ;; Mark headline as done
 
 
-    (setq jackel-workout-new-data-entered nil))
-  (if (jackel--current-table-complete)
+    (setq org-fit-workout-new-data-entered nil))
+  (if (org-fit--current-table-complete)
       (save-excursion
         (org-back-to-heading t)
         (org-todo "DONE"))
@@ -1122,81 +1122,81 @@ A plan is a special note that indicates how the user intends to complete a set."
       (org-back-to-heading t)
       (org-todo ""))))
 
-(defmacro jackel--with-workout-fold-settings (&rest body)
+(defmacro org-fit--with-workout-fold-settings (&rest body)
   "Run BODY with all headings unfolded.  After BODY apply fold settings."
   (declare (debug t) (indent 0))
   `(progn
-     (jackel--process-table-changes)
+     (org-fit--process-table-changes)
      (org-fold-show-all '(headings))
      ,@body
-     (jackel--apply-fold-setting)
+     (org-fit--apply-fold-setting)
      (org-table-align)))
 
-(defun jackel--input-column-types ()
+(defun org-fit--input-column-types ()
   "Return list of downcased column names that contain performance data."
   (list 'time 'distance 'reps 'weight))
 
-(defun jackel--start-rest-timer (&optional target)
+(defun org-fit--start-rest-timer (&optional target)
   "Set the rest timer.
 If TARGET is an integer, set timer for TARGET seconds in the future."
-  (setq jackel-workout-rest-time (cons (floor (float-time)) target))
-  (push jackel-workout-rest-time jackel-workout-rest-time-history))
+  (setq org-fit-workout-rest-time (cons (floor (float-time)) target))
+  (push org-fit-workout-rest-time org-fit-workout-rest-time-history))
 
-(defun jackel--add-rest-time (seconds)
+(defun org-fit--add-rest-time (seconds)
   "Add SECONDS to the current rest time.
 If no rest time is active, set timer for SECONDS in the future.
 If the rest time is over the previous target, set a new target to
 SECONDS after now."
-  (pcase jackel-workout-rest-time
+  (pcase org-fit-workout-rest-time
     (`(,_start . nil)
-     (setq jackel-workout-rest-time (cons (floor (float-time)) seconds)))
+     (setq org-fit-workout-rest-time (cons (floor (float-time)) seconds)))
     (`(,start ,duration ,done)
-     (setq jackel-workout-rest-time (list start (if duration (+ duration seconds) seconds) done)))
+     (setq org-fit-workout-rest-time (list start (if duration (+ duration seconds) seconds) done)))
     (`(,start . ,duration)
-     (setq jackel-workout-rest-time (cons start (if duration (+ duration seconds) seconds))))
+     (setq org-fit-workout-rest-time (cons start (if duration (+ duration seconds) seconds))))
     ('nil
-     (setq jackel-workout-rest-time (cons (floor (float-time)) seconds)))))
+     (setq org-fit-workout-rest-time (cons (floor (float-time)) seconds)))))
 
-(defun jackel--stop-rest-timer ()
+(defun org-fit--stop-rest-timer ()
   "Clear rest timer, stopping it."
-  (setq jackel-workout-rest-time nil))
+  (setq org-fit-workout-rest-time nil))
 
 
 ;; Workout commands:
 
-(defun jackel-workout-help ()
+(defun org-fit-workout-help ()
   "Display help message."
   (let* ((max-mini-window-height .75)
          (help-groups '(("Movement and Viewing"
-                         (jackel-workout-next-empty-field . "Move to next empty field")
-                         (jackel-workout-previous-empty-field . "Move to previous empty field")
-                         (jackel-workout-up-field . "Move to the field above current")
-                         (jackel-workout-down-field  . "Move to the field below current")
-                         (jackel-workout-left-field . "Move to the previous field")
-                         (jackel-workout-right-field . "Move to the next field"))
+                         (org-fit-workout-next-empty-field . "Move to next empty field")
+                         (org-fit-workout-previous-empty-field . "Move to previous empty field")
+                         (org-fit-workout-up-field . "Move to the field above current")
+                         (org-fit-workout-down-field  . "Move to the field below current")
+                         (org-fit-workout-left-field . "Move to the previous field")
+                         (org-fit-workout-right-field . "Move to the next field"))
                         ("Set Management"
-                         (jackel-workout-add-set . "Insert set row")
-                         (jackel-workout-remove-set . "Remove set row")
-                         (jackel-workout-add-note . "Add note to current set")
-                         (jackel-workout-add-warmup-set . "Add warmup set. Repeat for multiple")
+                         (org-fit-workout-add-set . "Insert set row")
+                         (org-fit-workout-remove-set . "Remove set row")
+                         (org-fit-workout-add-note . "Add note to current set")
+                         (org-fit-workout-add-warmup-set . "Add warmup set. Repeat for multiple")
                          (org-table-edit-field . "Edit current field")
                          (org-table-blank-field . "Blank out field"))
                         ("Exercise Management"
-                         (jackel-workout-add-exercise . "Add new exercise")
-                         (jackel-workout-remove-exercise . "Remove the current exercise")
-                         (jackel-workout-swap-exercise . "Swap current exercise for new one")
-                         (jackel-workout-toggle-view . "Toggle visibility of exercises between show-all and show-curent")
+                         (org-fit-workout-add-exercise . "Add new exercise")
+                         (org-fit-workout-remove-exercise . "Remove the current exercise")
+                         (org-fit-workout-swap-exercise . "Swap current exercise for new one")
+                         (org-fit-workout-toggle-view . "Toggle visibility of exercises between show-all and show-curent")
                          (org-move-subtree-up . "Move exercise up")
                          (org-move-subtree-down . "Move exercise down"))
                         ("Data Entry"
-                         (jackel-fill-in . "Fill in based on exercise notes")
-                         (jackel-workout-ditto . "Copy values from previous set")
-                         (jackel-fill-in-and-next-empty-field . "Fill in based on notes and go to next empty")
-                         (jackel-edit-and-next-empty-field . "Manually set current and go to the next field"))
+                         (org-fit-fill-in . "Fill in based on exercise notes")
+                         (org-fit-workout-ditto . "Copy values from previous set")
+                         (org-fit-fill-in-and-next-empty-field . "Fill in based on notes and go to next empty")
+                         (org-fit-edit-and-next-empty-field . "Manually set current and go to the next field"))
                         ("Session Management"
-                         (jackel-workout-rest . "Toggle rest timer. If over stop it. If no rest start it. If running, add 15s.")
-                         (jackel-workout-pause-start-session . "Pause/resume session timer.")
-                         (jackel-workout-quit . "Exit the current workout session."))))
+                         (org-fit-workout-rest . "Toggle rest timer. If over stop it. If no rest start it. If running, add 15s.")
+                         (org-fit-workout-pause-start-session . "Pause/resume session timer.")
+                         (org-fit-workout-quit . "Exit the current workout session."))))
          (help-str ""))
     (pcase-dolist (`(,heading . ,items ) help-groups)
       (setq help-str (concat help-str (propertize heading 'face '(:underline t)) ":\n") )
@@ -1216,7 +1216,7 @@ SECONDS after now."
                           " "
                           description "\n")))))
       (setq help-str (concat help-str "\n")))
-    (let ((buf (get-buffer-create "*jackel-workout-help*")))
+    (let ((buf (get-buffer-create "*org-fit-workout-help*")))
       (with-current-buffer buf
         (let ((inhibit-read-only t))
           (erase-buffer)
@@ -1225,22 +1225,22 @@ SECONDS after now."
         (goto-char (point-min)))
       (select-window (display-buffer buf)))))
 
-(defun jackel-workout-next-empty-field ()
+(defun org-fit-workout-next-empty-field ()
   "Move the point to the next empty field in a workout session."
   (interactive)
-  (jackel--with-workout-fold-settings
+  (org-fit--with-workout-fold-settings
     (let ((rest-time)
           (row-complete))
       (when-let* ((two-column-input (and (org-at-table-p)
-                                         (equal (jackel--table-current-column-type 3) 'notes)))
+                                         (equal (org-fit--table-current-column-type 3) 'notes)))
                   (complete (if two-column-input
                                     (and (not (string-blank-p (org-table-get (org-table-current-line) 1)))
                                          (not (string-blank-p (org-table-get (org-table-current-line) 2))))
                                   (not (string-blank-p (org-table-get (org-table-current-line) 1))))))
         (setq row-complete complete)
-        (setq rest-time (jackel--get-rest-time)))
+        (setq rest-time (org-fit--get-rest-time)))
       (let ((starting-point (point))
-            (next-field-column-names (jackel--input-column-types)))
+            (next-field-column-names (org-fit--input-column-types)))
         (catch 'done
           (while t
             (let ((next-field-exists (search-forward-regexp "|\\( \\) *|" nil t)))
@@ -1249,52 +1249,52 @@ SECONDS after now."
               (if next-field-exists
                   (progn
                     (goto-char (match-end 1))
-                    (when (member (jackel--table-current-column-type) next-field-column-names)
+                    (when (member (org-fit--table-current-column-type) next-field-column-names)
                       (throw 'done (point))))
                 (beep)
                 (goto-char starting-point)
                 (throw 'done (point)))))))
       (when row-complete
-        (jackel--start-rest-timer rest-time)))))
+        (org-fit--start-rest-timer rest-time)))))
 
-(defun jackel-workout-previous-empty-field ()
+(defun org-fit-workout-previous-empty-field ()
   "Move the point to the previous empty field in a workout session."
   (interactive)
-  (jackel--with-workout-fold-settings
+  (org-fit--with-workout-fold-settings
    (let ((starting-point (point))
-         (next-field-column-names (jackel--input-column-types)))
+         (next-field-column-names (org-fit--input-column-types)))
      (catch 'done
        (while t
          (let ((next-field-exists (search-backward-regexp "|\\( \\) *|" nil t)))
            (if next-field-exists
                (progn
                  (goto-char (match-end 1))
-                 (when (member (jackel--table-current-column-type) next-field-column-names)
+                 (when (member (org-fit--table-current-column-type) next-field-column-names)
                    (throw 'done nil)))
              (beep)
              (goto-char starting-point)
              (throw 'done nil))))))))
 
-(defconst jackel-workout-table-regex
-  (concat "| " " *" jackel-column-name-notes " *" " |")
+(defconst org-fit-workout-table-regex
+  (concat "| " " *" org-fit-column-name-notes " *" " |")
   "Regex which can be searched for to navigate tables.")
 
-(defun jackel--previous-table ()
+(defun org-fit--previous-table ()
   "Move the point to the previous workout table."
-  (search-backward-regexp jackel-workout-table-regex nil t))
+  (search-backward-regexp org-fit-workout-table-regex nil t))
 
-(defun jackel--next-table ()
+(defun org-fit--next-table ()
   "Move the point to the next workout table."
-  (search-forward-regexp jackel-workout-table-regex nil t))
+  (search-forward-regexp org-fit-workout-table-regex nil t))
 
-(defun jackel-workout-up-field ()
+(defun org-fit-workout-up-field ()
   "Move the next field above the current one."
   (interactive)
-  (jackel--with-workout-fold-settings
+  (org-fit--with-workout-fold-settings
     (let ((case-fold-search t)
           (current-column (org-table-current-column)))
       (if (= current-column 0)
-          (jackel-workout-left-field)
+          (org-fit-workout-left-field)
         (let ((current-line (org-table-current-line)))
           (if (> current-line 2)
               (progn
@@ -1304,33 +1304,33 @@ SECONDS after now."
             (org-fold-show-all)
             (org-table-goto-line 1)
             (forward-line -1)
-            (when (jackel--previous-table)
+            (when (org-fit--previous-table)
               (org-table-goto-line 9999)
               (org-table-goto-column current-column))))))))
 
-(defun jackel-workout-down-field ()
+(defun org-fit-workout-down-field ()
   "Move the next field below the current one."
   (interactive)
-  (jackel--with-workout-fold-settings
+  (org-fit--with-workout-fold-settings
     (let ((case-fold-search t)
           (current-column (org-table-current-column)))
       (if (= current-column 0)
           (progn
-            (jackel--next-table)
+            (org-fit--next-table)
             (org-table-goto-line 2)
             (org-table-goto-column 1))
         (let ((current-line (org-table-current-line)))
           (org-table-goto-line (1+ current-line))
           (org-table-goto-column current-column)
           (when (= (org-table-current-line) current-line)
-            (when (jackel--next-table)
+            (when (org-fit--next-table)
               (org-table-goto-line 2)
               (org-table-goto-column current-column))))))))
 
-(defun jackel-workout-right-field ()
+(defun org-fit-workout-right-field ()
   "Move the next field below the current one."
   (interactive)
-  (jackel--with-workout-fold-settings
+  (org-fit--with-workout-fold-settings
     (let ((case-fold-search t)
           (last-line (save-excursion
                        (goto-char (- (org-table-end) 2))
@@ -1343,15 +1343,15 @@ SECONDS after now."
       (if (and (= last-line current-line)
                (= last-col current-column))
           (progn
-            (jackel--next-table)
+            (org-fit--next-table)
             (org-table-goto-line 2)
             (org-table-goto-column 1))
         (org-table-next-field)))))
 
-(defun jackel-workout-left-field ()
+(defun org-fit-workout-left-field ()
   "Move the next field below the current one."
   (interactive)
-  (jackel--with-workout-fold-settings
+  (org-fit--with-workout-fold-settings
     (let ((case-fold-search t)
           (current-line (org-table-current-line))
           (current-column (org-table-current-column)))
@@ -1359,7 +1359,7 @@ SECONDS after now."
                (<= current-column 1))
           (progn
             (goto-char (org-table-begin))
-            (jackel--previous-table)
+            (org-fit--previous-table)
             (let ((last-line (save-excursion
                                (goto-char (- (org-table-end) 2))
                                (org-table-current-line)))
@@ -1370,20 +1370,20 @@ SECONDS after now."
               (org-table-goto-column last-col)))
         (org-table-previous-field)))))
 
-(defun jackel-workout-add-set ()
+(defun org-fit-workout-add-set ()
   "Add a set to the current routine."
   (interactive)
   (org-table-insert-row 2))
 
-(defun jackel-workout-remove-set ()
+(defun org-fit-workout-remove-set ()
   "Remove the set on the current line."
   (interactive)
   (org-table-kill-row))
 
-(defun jackel-workout-add-note (note)
+(defun org-fit-workout-add-note (note)
   "Add NOTE to the current set's note column."
   (interactive "sNote: ")
-  (unless (jackel--on-set-line)
+  (unless (org-fit--on-set-line)
     (user-error "No set on current line"))
   (let* ((current-line (org-table-current-line))
          (current-note (org-table-get current-line 3)) ;; TODO - make more general
@@ -1392,7 +1392,7 @@ SECONDS after now."
                      (concat current-note "; " note))))
     (org-table-put current-line 3 new-note t)))
 
-(defun jackel-workout-add-warmup-set ()
+(defun org-fit-workout-add-warmup-set ()
   "Insert a warmup set at the beginning the exercise."
   (interactive)
   ;; TODO - remove command repea, instaed count how many warmups already exist.
@@ -1403,69 +1403,69 @@ SECONDS after now."
         (if (string-match-p "warmup" note)
             (cl-incf warmup-count)
           (when (not set-target-weight)
-            (setq set-target-weight (jackel--target-weight-of-set note))))
+            (setq set-target-weight (org-fit--target-weight-of-set note))))
         (cl-incf line)))
     (org-table-goto-line 2)
     (org-table-goto-column 2)
     (let* ((set-target-weight (or set-target-weight
-                                  (jackel--read-weight "Warmup leading to weight")))
+                                  (org-fit--read-weight "Warmup leading to weight")))
            (warmup-routine (seq-find
                             (lambda (program)
                               (= (length program) warmup-count))
-                            jackel-warmup-program)))
+                            org-fit-warmup-program)))
       (org-table-insert-row)
       (dotimes (i warmup-count)
         (pcase-let* ((`(,percent . ,reps) (nth i warmup-routine))
                      (line (+ 2 i))
-                     (warmup-set-weight (and percent (jackel--* set-target-weight percent))))
+                     (warmup-set-weight (and percent (org-fit--* set-target-weight percent))))
           (if reps
               (org-table-put line 1 (number-to-string reps))
             (org-table-put line 1 ""))
           (org-table-put line 3
                          (if warmup-set-weight
-                             (concat (jackel--weight-to-string
-                                      (jackel--round-to-nearest
+                             (concat (org-fit--weight-to-string
+                                      (org-fit--round-to-nearest
                                        warmup-set-weight
                                        0.5)) ;; TODO: Make customizable
                                      "; warmup")
                            "warmup")
                          t))))))
 
-(defun jackel-stash-set ()
+(defun org-fit-stash-set ()
   "Blank the current set line and store it in a not on the current line."
   (interactive)
   (unless (org-at-table-p)
     (user-error "No table at point"))
-  (jackel--routine-set-to-note (org-table-current-line))
+  (org-fit--routine-set-to-note (org-table-current-line))
   (org-table-align))
 
-(defun jackel-workout-set-type (arg)
-  "Set label of the curent set based on jackel-set-labels.
+(defun org-fit-workout-set-type (arg)
+  "Set label of the curent set based on org-fit-set-labels.
 If prefix ARG is provided, clear the set label."
   (interactive (list (prefix-numeric-value current-prefix-arg)))
   (unless (org-at-table-p)
     (user-error "No table at point"))
   (if (= 4 arg)
-      (let* ((note (plist-get (jackel-row-to-lisp) 'notes))
+      (let* ((note (plist-get (org-fit-row-to-lisp) 'notes))
              (parts (string-split note ";" nil " *")))
-        (jackel-put-row 'notes
+        (org-fit-put-row 'notes
                       (string-join
                        (seq-remove
                         (lambda (part)
                           (seq-find (lambda (label)
                                       (string= label part))
-                                    jackel-set-labels))
+                                    org-fit-set-labels))
                         parts)
                        "; ")))
-    (let* ((label (completing-read "Lablel: " (cons "REMOVE" jackel-set-labels) nil t))
-           (note (plist-get (jackel-row-to-lisp) 'notes))
+    (let* ((label (completing-read "Lablel: " (cons "REMOVE" org-fit-set-labels) nil t))
+           (note (plist-get (org-fit-row-to-lisp) 'notes))
            (parts (string-split note ";" nil " *"))
            (no-append nil)
            (replaced (string-join (seq-map
                                    (lambda (part)
                                      (if (seq-find (lambda (label)
                                                      (string= label part))
-                                                   jackel-set-labels)
+                                                   org-fit-set-labels)
                                          (progn
                                            (setq no-append t)
                                            label)
@@ -1474,63 +1474,63 @@ If prefix ARG is provided, clear the set label."
                                   "; ")))
       (cond
        ((equal label "REMOVE")
-        (jackel-workout-set-type 4))
+        (org-fit-workout-set-type 4))
        (no-append
-        (jackel-put-row 'notes replaced))
+        (org-fit-put-row 'notes replaced))
        (t
-        (jackel-put-row 'notes (concat note "; " label)))))))`
-(defun jackel-workout-remove-exercise ()
+        (org-fit-put-row 'notes (concat note "; " label)))))))`
+(defun org-fit-workout-remove-exercise ()
   "Delete the current exercise in workout."
   (interactive)
   (org-mark-subtree)
   (delete-region (region-beginning) (region-end))
-  (unless (jackel-workout-next-empty-field)
-    (jackel-workout-previous-empty-field)))
+  (unless (org-fit-workout-next-empty-field)
+    (org-fit-workout-previous-empty-field)))
 
-(defun jackel-workout-swap-exercise (exercise-name arg)
+(defun org-fit-workout-swap-exercise (exercise-name arg)
   "Replace current exercise with a different exercise named EXERCISE-NAME."
-  (interactive (list (jackel-read-exercise) (prefix-numeric-value current-prefix-arg)))
-  (let ((prev-replaced (org-entry-get (point) jackel-exercise-replaced-from-property-name))
+  (interactive (list (org-fit-read-exercise) (prefix-numeric-value current-prefix-arg)))
+  (let ((prev-replaced (org-entry-get (point) org-fit-exercise-replaced-from-property-name))
         (current-val (org-get-heading t t t t)))
     (unless (equal exercise-name current-val)
       (unless prev-replaced
-        (org-set-property jackel-exercise-replaced-from-property-name current-val))
+        (org-set-property org-fit-exercise-replaced-from-property-name current-val))
       (if (= arg 4)
-          (jackel--with-workout-fold-settings
+          (org-fit--with-workout-fold-settings
            (let ((m (make-marker)))
              (set-marker m (point))
-             (jackel-workout-remove-exercise)
+             (org-fit-workout-remove-exercise)
              (goto-char m)
              (forward-line -1)
-             (jackel-workout-add-exercise exercise-name)))
+             (org-fit-workout-add-exercise exercise-name)))
         (org-edit-headline exercise-name)))))
 
-(defun jackel-workout-toggle-view ()
+(defun org-fit-workout-toggle-view ()
   "Toggle view mode from viewing current set to viewing all."
   (interactive)
-  (if (eql jackel-fold-setting 'all)
+  (if (eql org-fit-fold-setting 'all)
       (progn
-        (setq jackel-fold-setting 'hide-other)
+        (setq org-fit-fold-setting 'hide-other)
         (message "View set to hiding other exercises."))
-    (setq jackel-fold-setting 'all)
+    (setq org-fit-fold-setting 'all)
     (message "View set to showing all."))
   (org-fold-show-all '(headings))
-  (jackel--apply-fold-setting))
+  (org-fit--apply-fold-setting))
 
-(defun jackel-workout-info-dwim ()
+(defun org-fit-workout-info-dwim ()
   "Display info buffer regarding current position."
   (interactive)
-  (let* ((on-routine-p (alist-get "JACKEL_WORKOUT_ROUTINE" (org-entry-properties) nil nil 'equal)))
+  (let* ((on-routine-p (alist-get "ORG_FIT_WORKOUT_ROUTINE" (org-entry-properties) nil nil 'equal)))
     ;; TODO - should I add anything here for supersets?
     (unless on-routine-p
       (let* ((exercise-name (org-get-heading t t t t))
-             (body (jackel--exercise-body exercise-name))
-             (history (jackel--scan-past-workout-exercises exercise-name))
+             (body (org-fit--exercise-body exercise-name))
+             (history (org-fit--scan-past-workout-exercises exercise-name))
              (current (save-excursion
                         (save-restriction
                           (goto-char (point-min))
                           (search-forward-regexp "^|")
-                          (jackel-table-to-lisp))))
+                          (org-fit-table-to-lisp))))
              (buf (get-buffer-create (format "*Exercise: %s*" exercise-name))))
         (with-current-buffer buf
           (erase-buffer)
@@ -1539,109 +1539,109 @@ If prefix ARG is provided, clear the set label."
           (when body
             (insert body)
             (insert "\n"))
-          (let* ((best-set-volume (apply #'jackel--max
+          (let* ((best-set-volume (apply #'org-fit--max
                                          (seq-map
                                           (lambda (hist)
-                                            (jackel--table-best-set-volume (alist-get 'data hist)))
+                                            (org-fit--table-best-set-volume (alist-get 'data hist)))
                                           history)))
-                 (best-volume (apply #'jackel--max
+                 (best-volume (apply #'org-fit--max
                                      (seq-map
                                       (lambda (hist)
-                                        (jackel--table-volume (alist-get 'data hist)))
+                                        (org-fit--table-volume (alist-get 'data hist)))
                                       history)))
-                 (best-1rm (apply #'jackel--max
+                 (best-1rm (apply #'org-fit--max
                                   (seq-map
                                    (lambda (hist)
-                                     (jackel--table-1rm (alist-get 'data hist)))
+                                     (org-fit--table-1rm (alist-get 'data hist)))
                                    history)))
                  (best-1rm-hist (seq-find
                                  (lambda (hist)
                                    (and
                                     (equal best-1rm
-                                           (jackel--table-1rm (alist-get 'data hist)))
+                                           (org-fit--table-1rm (alist-get 'data hist)))
                                     hist))
                                  history))
                  (best-1rm-date (alist-get 'date best-1rm-hist))
-                 (best-1rm-row (jackel--table-1rm-row (alist-get 'data best-1rm-hist))))
-            (insert (format "   Best Set Volume: %s\n" (jackel--value-to-string best-set-volume)))
-            (insert (format "   Best Volume: %s\n" (jackel--value-to-string best-volume)))
+                 (best-1rm-row (org-fit--table-1rm-row (alist-get 'data best-1rm-hist))))
+            (insert (format "   Best Set Volume: %s\n" (org-fit--value-to-string best-set-volume)))
+            (insert (format "   Best Volume: %s\n" (org-fit--value-to-string best-volume)))
             (insert (format "   Best 1RM: %s on %s with %s x%d\n"
-                            (jackel--value-to-string best-1rm)
+                            (org-fit--value-to-string best-1rm)
                             best-1rm-date
-                            (jackel--value-to-string (car best-1rm-row))
+                            (org-fit--value-to-string (car best-1rm-row))
                             (cadr best-1rm-row))))
           (special-mode)
           (visual-line-mode 1))
         (display-buffer buf)))))
 
-(defun jackel-workout-convert-unit (arg)
+(defun org-fit-workout-convert-unit (arg)
   "Convert the unit of a value.
 With a prefix ARG, convert the value back into the default unit."
   (interactive "p")
   (let* ((line (org-table-current-line))
          (col (org-table-current-column))
-         (type (jackel--column-name-to-type (org-table-get 1 col))))
+         (type (org-fit--column-name-to-type (org-table-get 1 col))))
     (unless (eql type 'weight)
       (user-error "Not on a weight field"))
-    (pcase-let* ((`(,val . ,unit) (jackel--parse-weight
+    (pcase-let* ((`(,val . ,unit) (org-fit--parse-weight
                                    (org-table-get line col)))
                  (new-weight (if (eql unit :kg)
                                  (cons val :lb)
                                (cons val :kg))))
       (if (= arg 4)
-          (org-table-put line col (jackel--weight-to-string (jackel--convert new-weight
-                                                                             jackel-default-unit)))
-        (org-table-put line col (jackel--weight-to-string new-weight)))
+          (org-table-put line col (org-fit--weight-to-string (org-fit--convert new-weight
+                                                                             org-fit-default-unit)))
+        (org-table-put line col (org-fit--weight-to-string new-weight)))
       (org-table-align))))
 
-(defun jackel-fill-in ()
+(defun org-fit-fill-in ()
   "Fill in the current cell according to note."
   (interactive)
-  (let* ((note-data (jackel--extract-table-from-note))
+  (let* ((note-data (org-fit--extract-table-from-note))
          (cell-value (org-table-get (org-table-current-line) (org-table-current-column)))
-         (column-type (jackel--table-current-column-type))
-         (two-input-table-p (equal (jackel--table-current-column-type 3) 'notes))
+         (column-type (org-fit--table-current-column-type))
+         (two-input-table-p (equal (org-fit--table-current-column-type 3) 'notes))
          (col1-val (org-table-get (org-table-current-line) 1))
          (col2-val (org-table-get (org-table-current-line) 2)))
     (cond
      ((and (not (alist-get column-type note-data)) two-input-table-p)
       (let* ((other-col (if (= (org-table-current-column) 1) 2 1))
-             (other-col-type (jackel--table-current-column-type other-col))
+             (other-col-type (org-fit--table-current-column-type other-col))
              (other-col-current-val (org-table-get (org-table-current-line) other-col))
-             (other-col-val (jackel--value-to-string (alist-get other-col-type note-data))))
+             (other-col-val (org-fit--value-to-string (alist-get other-col-type note-data))))
         (if (and other-col-val (string-blank-p other-col-current-val))
             (org-table-put (org-table-current-line) other-col other-col-val)
           (org-table-put (org-table-current-line) other-col ""))))
      ((not (alist-get column-type note-data))
       (beep))
      ((string-blank-p cell-value)
-      (let ((note-val (jackel--value-to-string (alist-get column-type note-data))))
+      (let ((note-val (org-fit--value-to-string (alist-get column-type note-data))))
         (org-table-put (org-table-current-line) (org-table-current-column) note-val))
       (when (not two-input-table-p)
-        (jackel--start-rest-timer)))
+        (org-fit--start-rest-timer)))
      ((not two-input-table-p)
       (org-table-put (org-table-current-line) (org-table-current-column) ""))
      ((string-blank-p col1-val)
-      (let ((note-val (jackel--value-to-string
-                       (alist-get (jackel--table-current-column-type 1) note-data))))
+      (let ((note-val (org-fit--value-to-string
+                       (alist-get (org-fit--table-current-column-type 1) note-data))))
         (org-table-put (org-table-current-line) 1 note-val))
-      (jackel--start-rest-timer))
+      (org-fit--start-rest-timer))
      ((string-blank-p col2-val)
-      (let ((note-val (jackel--value-to-string
-                       (alist-get (jackel--table-current-column-type 2) note-data))))
+      (let ((note-val (org-fit--value-to-string
+                       (alist-get (org-fit--table-current-column-type 2) note-data))))
         (org-table-put (org-table-current-line) 2 note-val))
-      (jackel--start-rest-timer))
+      (org-fit--start-rest-timer))
      (t
       (org-table-put (org-table-current-line) 1 "")
       (org-table-put (org-table-current-line) 2 "")))
     (org-table-align)))
 
-(defun jackel-fill-in-and-next-empty-field ()
+(defun org-fit-fill-in-and-next-empty-field ()
   (interactive)
-  (let* ((note-data (jackel--extract-table-from-note))
+  (let* ((note-data (org-fit--extract-table-from-note))
          (cell-value (org-table-get (org-table-current-line) (org-table-current-column)))
-         (column-type (jackel--table-current-column-type))
-         (two-input-table-p (equal (jackel--table-current-column-type 3) 'notes))
+         (column-type (org-fit--table-current-column-type))
+         (two-input-table-p (equal (org-fit--table-current-column-type 3) 'notes))
          (prompt (lambda (col-name) (read-string
                                      (format "Cell %s value: " col-name )))))
     (cond
@@ -1652,27 +1652,27 @@ With a prefix ARG, convert the value back into the default unit."
       (org-table-put (org-table-current-line) (org-table-current-column)
                      (funcall prompt column-type)))
      ((string-blank-p cell-value)
-      (let ((note-val (jackel--value-to-string (alist-get column-type note-data))))
+      (let ((note-val (org-fit--value-to-string (alist-get column-type note-data))))
         (org-table-put (org-table-current-line) (org-table-current-column) note-val))
       (when (not two-input-table-p)
         (org-table-put (org-table-current-line) (org-table-current-column)
                        (funcall prompt column-type)))))
     (org-table-align))
-  (jackel-workout-next-empty-field))
+  (org-fit-workout-next-empty-field))
 
-(defun jackel-edit-and-next-empty-field ()
+(defun org-fit-edit-and-next-empty-field ()
   (interactive)
-  (let* ((column-type (jackel--table-current-column-type))
+  (let* ((column-type (org-fit--table-current-column-type))
          (prompt (lambda (col-name) (read-string
                                      (format "Cell %s value: " col-name )))))
     (org-table-put (org-table-current-line) (org-table-current-column)
                        (funcall prompt column-type))
     (org-table-align))
-  (jackel-workout-next-empty-field))
+  (org-fit-workout-next-empty-field))
 
-(defun jackel--rest-over-p ()
+(defun org-fit--rest-over-p ()
   "Return non-nil if an active rest timer is on and it is over-time."
-  (pcase jackel-workout-rest-time
+  (pcase org-fit-workout-rest-time
     (`(,_start . nil)
      (ignore))
     (`(,start ,duration ,_done)
@@ -1684,7 +1684,7 @@ With a prefix ARG, convert the value back into the default unit."
     ('nil
      (ignore))))
 
-(defun jackel-workout-rest (arg)
+(defun org-fit-workout-rest (arg)
   "Start rest if not started.  Otherwise add 15 seconds to rest.
 With a prefix ARG, rerun the rest timer at current point from the start.
 With two prefix args, prompt the user for a custom time to run."
@@ -1692,35 +1692,35 @@ With two prefix args, prompt the user for a custom time to run."
   (cond
    ((= arg 16)
     (let* ((secs (read-number "Rest seconds: ")))
-     (jackel--start-rest-timer secs)))
+     (org-fit--start-rest-timer secs)))
    ((= arg 4)
-    (let* ((rest-str (org-entry-get (point) jackel-autorest-property-name)))
-     (jackel--start-rest-timer (when rest-str (jackel--parse-duration rest-str)))))
-   ((jackel--rest-over-p)
-    (jackel--stop-rest-timer))
-   (jackel-workout-rest-time
-    (jackel--add-rest-time 15 ))
+    (let* ((rest-str (org-entry-get (point) org-fit-autorest-property-name)))
+     (org-fit--start-rest-timer (when rest-str (org-fit--parse-duration rest-str)))))
+   ((org-fit--rest-over-p)
+    (org-fit--stop-rest-timer))
+   (org-fit-workout-rest-time
+    (org-fit--add-rest-time 15 ))
    (t
-    (let* ((rest-str (org-entry-get (point) jackel-autorest-property-name)))
-      (jackel--start-rest-timer (when rest-str (jackel--parse-duration rest-str)))))))
+    (let* ((rest-str (org-entry-get (point) org-fit-autorest-property-name)))
+      (org-fit--start-rest-timer (when rest-str (org-fit--parse-duration rest-str)))))))
 
-(defun jackel-workout-rest-pop ()
+(defun org-fit-workout-rest-pop ()
   "Use the periosly started rest time, discarding the current."
   (interactive)
-  (if jackel-workout-rest-time-history
-      (setq jackel-workout-rest-time (pop jackel-workout-rest-time-history))
-    (setq jackel-workout-rest-time nil)))
+  (if org-fit-workout-rest-time-history
+      (setq org-fit-workout-rest-time (pop org-fit-workout-rest-time-history))
+    (setq org-fit-workout-rest-time nil)))
 
-(defun jackel-workout-ditto (arg)
+(defun org-fit-workout-ditto (arg)
   "Copy the value of the row above for the current cell.
 If a prefix ARG is provided, copy the entire row."
   (interactive "p")
-  (unless (jackel--on-set-line)
+  (unless (org-fit--on-set-line)
     (user-error "No set on current line"))
   (let* ((current-line (org-table-current-line)))
     (if (<= current-line 2)
         (beep)
-      (let ((two-input-table-p (equal (jackel--table-current-column-type 3) 'notes)))
+      (let ((two-input-table-p (equal (org-fit--table-current-column-type 3) 'notes)))
         (if two-input-table-p
             (let* ((up-val1 (org-table-get (1- current-line) 1))
                    (up-val2 (org-table-get (1- current-line) 2)))
@@ -1735,15 +1735,15 @@ If a prefix ARG is provided, copy the entire row."
           (let* ((up-val (org-table-get (1- current-line) 1)))
             (org-table-put current-line 1 up-val t)))))))
 
-(defun jackel-set-point (event &optional promote-to-region)
+(defun org-fit-set-point (event &optional promote-to-region)
   (interactive "e\np")
   (if (eql (org-element-type (org-element-at-point)) 'headline)
       (progn
         (funcall #'mouse-set-point event promote-to-region)
-        (jackel-workout-right-field))
+        (org-fit-workout-right-field))
     (funcall #'mouse-set-point event promote-to-region)))
 
-(defun jackel--insert-reference-point ()
+(defun org-fit--insert-reference-point ()
   "Return a point assocciated with current table.
 This is used to know when a user asa switched to editing a
 different field."
@@ -1753,61 +1753,61 @@ different field."
       (forward-char -1))
     (point)))
 
-(defun jackel-self-insert-command ()
+(defun org-fit-self-insert-command ()
   "Insert key, erasing table cell when editing for first time."
   (interactive)
-  (let ((ref-point (jackel--insert-reference-point)))
-    (when (not (equal jackel-insert-reference-point ref-point))
+  (let ((ref-point (org-fit--insert-reference-point)))
+    (when (not (equal org-fit-insert-reference-point ref-point))
       (org-table-blank-field)
-      (setq jackel-insert-reference-point ref-point)
-      (setq jackel-workout-new-data-entered t))
+      (setq org-fit-insert-reference-point ref-point)
+      (setq org-fit-workout-new-data-entered t))
     (call-interactively #'org-self-insert-command)))
 
-(defvar jackel-exercise-statistics-overlay nil
+(defvar org-fit-exercise-statistics-overlay nil
   "Variable to store exercise statistics overlay.
 This overlay is normally placed at the end of an exercie's table.")
 
-(defun jackel--put-exercise-statistics-overlay ()
+(defun org-fit--put-exercise-statistics-overlay ()
   "Put exercise statistics overlay for the current exercise."
-  (when (overlayp jackel-exercise-statistics-overlay)
-    (delete-overlay jackel-exercise-statistics-overlay)
-    (setq jackel-exercise-statistics-overlay nil))
+  (when (overlayp org-fit-exercise-statistics-overlay)
+    (delete-overlay org-fit-exercise-statistics-overlay)
+    (setq org-fit-exercise-statistics-overlay nil))
   (when (org-at-table-p)
     (let* ((exercise-name (org-get-heading t t t t))
-           (last-exercise (cadr (jackel--scan-past-workout-exercises exercise-name)))
-           (current-data (jackel-table-to-lisp))
-           (volume (jackel--table-volume current-data))
-           (1rm (jackel--table-1rm current-data))
-           (best-set-volume (jackel--table-best-set-volume current-data))
+           (last-exercise (cadr (org-fit--scan-past-workout-exercises exercise-name)))
+           (current-data (org-fit-table-to-lisp))
+           (volume (org-fit--table-volume current-data))
+           (1rm (org-fit--table-1rm current-data))
+           (best-set-volume (org-fit--table-best-set-volume current-data))
            (ov (make-overlay (1- (org-table-end)) (1- (org-table-end)))))
       (if last-exercise
           (progn
             (let* ((last-data (alist-get 'data last-exercise))
                    (last-date (alist-get 'date last-exercise))
-                   (last-volume (jackel--table-volume last-data))
-                   (last-1rm (jackel--table-1rm last-data))
-                   (last-best-set-volume (jackel--table-best-set-volume last-data)))
+                   (last-volume (org-fit--table-volume last-data))
+                   (last-1rm (org-fit--table-1rm last-data))
+                   (last-best-set-volume (org-fit--table-best-set-volume last-data)))
               (overlay-put ov 'after-string
                            (format (concat "\n"
                                            "Best 1RM: %s (%s)\n"
                                            "Total Volume: %s (%s)\n"
                                            "Best set volume: %s (%s)\n"
                                            "                       (%d days ago)\n")
-                                   (jackel--value-to-string 1rm)
-                                   (jackel--value-to-string last-1rm)
-                                   (jackel--value-to-string volume)
-                                   (jackel--value-to-string last-volume)
-                                   (jackel--value-to-string best-set-volume)
-                                   (jackel--value-to-string last-best-set-volume)
+                                   (org-fit--value-to-string 1rm)
+                                   (org-fit--value-to-string last-1rm)
+                                   (org-fit--value-to-string volume)
+                                   (org-fit--value-to-string last-volume)
+                                   (org-fit--value-to-string best-set-volume)
+                                   (org-fit--value-to-string last-best-set-volume)
                                    (- (org-time-stamp-to-now last-date))))))
         (overlay-put ov 'after-string
                      (format "\nBest 1RM: %s\nTotal Volume: %s\nBest set volume: %s\n"
-                             (jackel--value-to-string 1rm)
-                             (jackel--value-to-string volume)
-                             (jackel--value-to-string best-set-volume))))
-      (setq jackel-exercise-statistics-overlay ov))))
+                             (org-fit--value-to-string 1rm)
+                             (org-fit--value-to-string volume)
+                             (org-fit--value-to-string best-set-volume))))
+      (setq org-fit-exercise-statistics-overlay ov))))
 
-(defun jackel--header-line ()
+(defun org-fit--header-line ()
   "Return the header-line string for current session.
 It is expected that this function runs once a second."
   (let* ((clock-time (org-clock-get-clocked-time))
@@ -1819,15 +1819,15 @@ It is expected that this function runs once a second."
          (workout-time)
          (rest-time ""))
     (if (and org-clock-current-task
-             (string-match-p (regexp-quote jackel-active-workout-name)
+             (string-match-p (regexp-quote org-fit-active-workout-name)
                              org-clock-heading))
         (setq workout-time (if (> clock-hours 0)
                                (format "%02d:%02d:%02d" clock-hours clock-minutes seconds)
                              (format "%02d:%02d" clock-minutes seconds)))
       (setq workout-time "PAUSED"))
-    (when jackel-workout-rest-time
+    (when org-fit-workout-rest-time
       (let (rest-start rest-target)
-        (pcase jackel-workout-rest-time
+        (pcase org-fit-workout-rest-time
           (`(,start ,target ,_) (setq rest-start start rest-target target))
           (`(,start . ,target) (setq rest-start start rest-target target)))
         (let ((seconds-passed (- (floor (float-time)) rest-start)))
@@ -1863,14 +1863,14 @@ It is expected that this function runs once a second."
                   (setq rest-time (format "REST: %d:%02d" mins secs))
                 (setq rest-time (format "REST: %ds" secs))))))))
     (format "%s   %s   %s"
-            jackel-active-workout-name
+            org-fit-active-workout-name
             workout-time
             rest-time)))
 
-(defun jackel--rest-over-beep ()
+(defun org-fit--rest-over-beep ()
   (when (fboundp #'android-notifications-notify)
     (android-notifications-notify :title "Rest Over" :body "your rest is over" :urgency 'normal
-                                  :group "jackel-rest-over"))
+                                  :group "org-fit-rest-over"))
   (dotimes (_ 20)
     (sleep-for 0.01)
     (beep))
@@ -1879,52 +1879,52 @@ It is expected that this function runs once a second."
     (sleep-for 0.01)
     (beep)))
 
-(defun jackel-workout-update-handler ()
-  "Handler function for the timer `jackel-workout-mode-timer'.
+(defun org-fit-workout-update-handler ()
+  "Handler function for the timer `org-fit-workout-mode-timer'.
 Responsible for updating `header-line-format'."
-  (when (and (jackel--rest-over-p)
-             (consp jackel-workout-rest-time)
-             (not (consp (cdr jackel-workout-rest-time))))
-    (run-hooks 'jackel-rest-timer-over-hook)
-    (setq jackel-workout-rest-time
-          (list (car jackel-workout-rest-time)
-                (cdr jackel-workout-rest-time)
+  (when (and (org-fit--rest-over-p)
+             (consp org-fit-workout-rest-time)
+             (not (consp (cdr org-fit-workout-rest-time))))
+    (run-hooks 'org-fit-rest-timer-over-hook)
+    (setq org-fit-workout-rest-time
+          (list (car org-fit-workout-rest-time)
+                (cdr org-fit-workout-rest-time)
                 t)))
-  (when jackel-workout-mode
-    (setq-local header-line-format (jackel--header-line))
-    (jackel--put-exercise-statistics-overlay)))
+  (when org-fit-workout-mode
+    (setq-local header-line-format (org-fit--header-line))
+    (org-fit--put-exercise-statistics-overlay)))
 
 
-(define-minor-mode jackel-workout-mode
-  "Toggle `jackel-workout-mode'.
-`jackel-workout-mode' provides an easy way to input workout data
+(define-minor-mode org-fit-workout-mode
+  "Toggle `org-fit-workout-mode'.
+`org-fit-workout-mode' provides an easy way to input workout data
 by adding certain keybindings and automatically tracking certain changes."
   :global nil
-  (when (timerp jackel-workout-mode-timer)
-    (cancel-timer jackel-workout-mode-timer))
-  (if (not jackel-workout-mode)
+  (when (timerp org-fit-workout-mode-timer)
+    (cancel-timer org-fit-workout-mode-timer))
+  (if (not org-fit-workout-mode)
       (progn
         (setq header-line-format nil)
-        (when (overlayp jackel-exercise-statistics-overlay)
-          (delete-overlay jackel-exercise-statistics-overlay)
-          (setq jackel-exercise-statistics-overlay nil)
-          (setq jackel-workout-rest-time-history nil)
-          (setq jackel-workout-rest-time nil)))
-    (setq header-line-format (or jackel-active-workout-name ""))
+        (when (overlayp org-fit-exercise-statistics-overlay)
+          (delete-overlay org-fit-exercise-statistics-overlay)
+          (setq org-fit-exercise-statistics-overlay nil)
+          (setq org-fit-workout-rest-time-history nil)
+          (setq org-fit-workout-rest-time nil)))
+    (setq header-line-format (or org-fit-active-workout-name ""))
     (setq-local org-log-done nil)
     (setq-local org-log-into-drawer nil)
     (setq-local org-todo-log-states nil)
-    (setq jackel-workout-mode-timer (run-at-time nil 0.5 #'jackel-workout-update-handler))
+    (setq org-fit-workout-mode-timer (run-at-time nil 0.5 #'org-fit-workout-update-handler))
     (when (fboundp 'set-text-conversion-style)
       (set-text-conversion-style nil))))
 
-(defun jackel-new-workout (routine-headline)
+(defun org-fit-new-workout (routine-headline)
   "Create a new workout set for selected ROUTINE-HEADLINE."
-  (interactive (list (jackel-read-routine)))
-  (let* ((past-routines (jackel--scan-past-workout-routines routine-headline)))
+  (interactive (list (org-fit-read-routine)))
+  (let* ((past-routines (org-fit--scan-past-workout-routines routine-headline)))
     (cond
      ((= 0 (length past-routines))
-      (jackel--capture-new-workout (jackel--get-routine-by-name routine-headline)))
+      (org-fit--capture-new-workout (org-fit--get-routine-by-name routine-headline)))
      (t
       (let* ((choice (completing-read "Create a new routine..."
                                       (seq-filter #'identity
@@ -1935,55 +1935,55 @@ by adding certain keybindings and automatically tracking certain changes."
                                       nil t)))
         (pcase choice
           ("from original template"
-           (jackel--capture-new-workout (jackel--get-routine-by-name routine-headline)))
+           (org-fit--capture-new-workout (org-fit--get-routine-by-name routine-headline)))
           ("from most recent exercise routine"
-           (jackel--capture-new-workout (alist-get 'routine (car past-routines))))
+           (org-fit--capture-new-workout (alist-get 'routine (car past-routines))))
           ("select from list of past completed routines"
            (let* ((dates (seq-map (lambda (x) (alist-get 'date x)) past-routines))
                   (selected-date (completing-read "Use routine completed on date: "
                                                   dates)))
-             (jackel--capture-new-workout
+             (org-fit--capture-new-workout
               (alist-get 'routine
                          (seq-find (lambda (r)
                                      (equal selected-date (alist-get 'date r)))
                                    past-routines)))))))))))
 
-(defun jackel-start-workout ()
+(defun org-fit-start-workout ()
   "Start or continue the workout at the current point."
   (interactive)
-  (jackel--set-workout-to-active))
+  (org-fit--set-workout-to-active))
 
-(defun jackel-new-workout-and-start (routine-headline)
+(defun org-fit-new-workout-and-start (routine-headline)
   "Cerate new instance of ROUTINE-HEADLINE and start it."
-  (interactive (list (jackel-read-routine)))
-  (jackel-new-workout routine-headline)
-  (jackel--set-workout-to-active))
+  (interactive (list (org-fit-read-routine)))
+  (org-fit-new-workout routine-headline)
+  (org-fit--set-workout-to-active))
 
-(defun jackel-workout-pause-start-session ()
+(defun org-fit-workout-pause-start-session ()
   "Start/stop the org-clock assocciated with the current workout."
   (interactive)
   (if org-clock-current-task
       (org-clock-out)
     (save-excursion
-      (goto-char jackel-workout-heading-marker)
+      (goto-char org-fit-workout-heading-marker)
       (org-clock-in))))
 
-(defun jackel-workout-quit ()
+(defun org-fit-workout-quit ()
   "Quit the current workout."
   (interactive)
-  (jackel--process-table-changes)
+  (org-fit--process-table-changes)
   (when org-clock-current-task
     (org-clock-out))
-  (jackel-workout-mode 0)
+  (org-fit-workout-mode 0)
   (widen)
   (save-buffer))
 
 ;;; Exercise Display
 
-(defun jackel-display-exercise (exercise-elt)
+(defun org-fit-display-exercise (exercise-elt)
   "Display the exercise info buffer for a given org element EXERCISE-ELT."
   (let* ((exercise-name (org-element-property :raw-value exercise-elt))
-         (buf (get-buffer-create (format "*jackel - %s*" exercise-name))))
+         (buf (get-buffer-create (format "*org-fit - %s*" exercise-name))))
     (with-current-buffer buf
       (let ((inhibit-read-only t))
         (erase-buffer)
@@ -1991,11 +1991,11 @@ by adding certain keybindings and automatically tracking certain changes."
         (special-mode)))
     (display-buffer buf)))
 
-;; (defun jackel-browse-exercises (exercise-elt)
+;; (defun org-fit-browse-exercises (exercise-elt)
 ;;   "Display the exercise page for given exercise org element EXERCISE-ELT."
 ;;   (interactive
-;;    (list (jackel--completing-read-elements (jackel-exercise-elements))))
-;;   (jackel-display-exercise exercise-elt))
+;;    (list (org-fit--completing-read-elements (org-fit-exercise-elements))))
+;;   (org-fit-display-exercise exercise-elt))
 
-(provide 'jackel)
-;;; jackel.el ends here
+(provide 'org-fit)
+;;; org-fit.el ends here
