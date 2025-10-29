@@ -114,6 +114,9 @@ This should be a comma seperated list of items.")
 (defconst jackel-column-name-notes "notes"
   "The column name for recording a time.")
 
+(defconst jackel-set-labels '("warmup" "failure" "drop")
+  "List of labels that can apply to a given set.")
+
 ;; Workout-mode related
 
 (defvar jackel-workout-heading-marker nil
@@ -400,7 +403,8 @@ Recognized properties are:
     ('reps (string-to-number str))
     ('weight (jackel--parse-weight str))
     ('time (jackel--parse-duration str))
-    ('distance (error "Not implemented"))))
+    ('distance (error "Not implemented"))
+    ('notes str)))
 
 (defun jackel--read-weight (&optional prompt)
   "Prompt the user to input a weight.
@@ -525,6 +529,30 @@ Arguments may be reversed."
                     (t (list type (jackel--parse str type)))))
                  row col-types)))
              (cddr data))))
+
+(defun jackel-row-to-lisp ()
+  "Return a list representation of the current row."
+  (let* ((line (org-table-current-line))
+         (col1 (jackel--column-name-to-type (org-table-get 1 1)))
+         (col1-val (jackel--parse (org-table-get line 1) col1))
+         (col2 (jackel--column-name-to-type (org-table-get 1 2)))
+         (col2-val (jackel--parse (org-table-get line 2) col2))
+         (col3 (jackel--column-name-to-type (org-table-get 1 3)))
+         (ret (list col1 col1-val
+                    col2 col2-val)))
+    (when col3
+      (setq ret (append ret (list col3 (jackel--parse (org-table-get line 3) col3)))))
+    (when-let* ((note (plist-get ret 'notes))
+                (target (jackel--extract-table-from-note note)))
+      (setq ret (append ret (list 'target target))))
+    ret))
+
+(defun jackel-put-row (col-type val-str)
+  "Write VAL-STR to the column of type COL-TYPE."
+  (let* ((col-no (cl-loop for col from 1 to 3
+                          if (eql col-type (jackel--column-name-to-type (org-table-get 1 col)))
+                          return col)))
+    (org-table-put (org-table-current-line) col-no val-str t)))
 
 
 ;;; Exercises
@@ -676,7 +704,7 @@ Arguments may be reversed."
               (save-restriction
                 (org-narrow-to-subtree)
                 (when (search-forward-regexp org-table-line-regexp nil t)
-                  (setq exercise-table (org-table-to-lisp)))))
+                  (setq exercise-table (jackel-table-to-lisp)))))
             (when exercise-table
               (push `((date . ,date)
                       (data . ,exercise-table))
@@ -699,100 +727,55 @@ Arguments may be reversed."
 
 (defun jackel--table-volume (table-data)
   "Calculate the volume from TABLE-DATA."
-  (let ((col1 (jackel--column-name-to-type (nth 0 (nth 0 table-data))))
-        (col2 (jackel--column-name-to-type (nth 1 (nth 0 table-data)))))
-    (apply
-     #'jackel--+
-     (seq-map
-      (lambda (row)
-        (let ((vals (butlast row 1)))
-          (if (= (length vals) 1)
-              (jackel--parse (car vals) col1)
-            (jackel--* (jackel--parse (car vals) col1)
-                       (jackel--parse (cadr vals) col2)))))
-      (seq-drop table-data 2)))))
+  (apply
+   #'jackel--+
+   (seq-map
+    (lambda (row)
+      (let ((weight (plist-get row 'weight))
+            (reps (plist-get row 'reps)))
+        (when (and weight reps)
+          (jackel--* weight reps))))
+    table-data)))
 
 (defun jackel--table-1rm-row (table-data)
   "Return row data of best 1rm from TABLE-DATA."
-  (let ((col1 (jackel--column-name-to-type (nth 0 (nth 0 table-data))))
-        (col2 (jackel--column-name-to-type (nth 1 (nth 0 table-data))))
-        (1rm-to-row (make-hash-table :test #'equal))
+  (let ((1rm-to-row (make-hash-table :test #'equal))
         (best-1rm))
     (setq best-1rm
           (apply
            #'jackel--max
            (seq-map
             (lambda (row)
-              (let* ((vals (butlast row 1))
-                     (1rm (cond
-                           ((= (length vals) 1)
-                            nil)
-                           ((and (eql col1 'weight)
-                                 (eql col2 'reps))
-                            (funcall jackel-1rm-function
-                                     (jackel--parse (car vals) col1)
-                                     (jackel--parse (cadr vals) col2)))
-                           ((and (eql col1 'reps)
-                                 (eql col2 'weight))
-                            (funcall jackel-1rm-function
-                                     (jackel--parse (cadr vals) col2)
-                                     (jackel--parse (car vals) col1)))
-                           (t nil))))
-                (when (> (length vals) 1)
-                  (pcase-let* ((`(,weight ,reps)
-                                (cond
-                                 ((and (eql col1 'weight)
-                                       (eql col2 'reps))
-                                  (list (jackel--parse (car vals) col1) (jackel--parse (cadr vals) col2)))
-                                 ((and (eql col1 'reps)
-                                       (eql col2 'weight))
-                                  (list (jackel--parse (cadr vals) col2) (jackel--parse (car vals) col1))))))
-                    (when (and weight reps)
-                      (let* ((1rm (funcall jackel-1rm-function weight reps)))
-                        (puthash 1rm (list weight reps) 1rm-to-row)
-                        1rm))))))
-            (seq-drop table-data 2))))
+              (let* ((weight (plist-get row 'weight))
+                     (reps (plist-get row 'reps)))
+                (when (and weight reps)
+                  (let* ((1rm (funcall jackel-1rm-function weight reps)))
+                    (puthash 1rm (list weight reps) 1rm-to-row)
+                    1rm))))
+            table-data)))
     (gethash best-1rm 1rm-to-row)))
 
 (defun jackel--table-1rm (table-data)
   "Calculate the best 1RM from TABLE-DATA."
-  (let ((col1 (jackel--column-name-to-type (nth 0 (nth 0 table-data))))
-        (col2 (jackel--column-name-to-type (nth 1 (nth 0 table-data)))))
-    (apply
-     #'jackel--max
-     (seq-map
-      (lambda (row)
-        (let ((vals (butlast row 1)))
-          (cond
-           ((= (length vals) 1)
-            nil)
-           ((and (eql col1 'weight)
-                 (eql col2 'reps))
-            (funcall jackel-1rm-function
-                     (jackel--parse (car vals) col1)
-                     (jackel--parse (cadr vals) col2)))
-           ((and (eql col1 'reps)
-                 (eql col2 'weight))
-            (funcall jackel-1rm-function
-                     (jackel--parse (cadr vals) col2)
-                     (jackel--parse (car vals) col1)))
-           (t nil))))
-      (seq-drop table-data 2)))))
+  (apply
+   #'jackel--max
+   (seq-map
+    (lambda (row)
+      (let ((weight (plist-get row 'weight))
+            (reps (plist-get row 'reps)))
+        (funcall jackel-1rm-function weight reps)))
+    table-data)))
 
 (defun jackel--table-best-set-volume (table-data)
   "Calculate the best 1RM from TABLE-DATA."
-  (let ((col1 (jackel--column-name-to-type (nth 0 (nth 0 table-data))))
-        (col2 (jackel--column-name-to-type (nth 1 (nth 0 table-data)))))
-    (apply
-     #'jackel--max
-     (seq-map
-      (lambda (row)
-        (let ((vals (butlast row 1)))
-          (if (= (length vals) 1)
-              (jackel--parse (car vals) col1)
-            (jackel--* (jackel--parse (car vals) col1)
-                       (jackel--parse (cadr vals) col2)))))
-      (seq-drop table-data 2)))))
+  (apply
+   #'jackel--max
+   (seq-map
+    (lambda (row)
+      (let ((weight (plist-get row 'weight))
+            (reps (plist-get row 'reps)))
+        (jackel--* weight reps)))
+    table-data)))
 
 (defun jackel--1rm-brzycki (weight reps)
   (jackel--* weight (/ 1.0 (- 1.0278 (* 0.0278 reps)))))
@@ -978,6 +961,7 @@ by the command `jackel-fill-in'."
     (keymap-set map "e" #'org-table-edit-field)
     (keymap-set map "x" #'org-table-blank-field)
     (keymap-set map ">" #'jackel-stash-set)
+    (keymap-set map "t" #'jackel-workout-set-type)
 
     ;; Exercise Management
     (keymap-set map "E" #'jackel-workout-add-exercise)
@@ -1455,21 +1439,46 @@ SECONDS after now."
   (jackel--routine-set-to-note (org-table-current-line))
   (org-table-align))
 
-(defun jackel-workout-note-set (note)
-  "Add a new note NOTE to the current set."
-  (interactive "sNote: ")
-  (jackel-workout-add-note note))
-
-(defun jackel-workout-add-exercise (exercise-name)
-  "Add a exercise named EXERCISE-NAME to the current routine."
-  (interactive (list (jackel-read-exercise)))
-  (let* ((exercise-type (jackel--get-exercise-type exercise-name)))
-    (org-insert-heading-respect-content)
-    (insert exercise-name "\n\n")
-    (jackel--insert-blank-exercise-table exercise-type)
-    (org-previous-visible-heading 1)
-    (jackel-workout-next-empty-field)))
-
+(defun jackel-workout-set-type (arg)
+  "Set label of the curent set based on jackel-set-labels.
+If prefix ARG is provided, clear the set label."
+  (interactive (list (prefix-numeric-value current-prefix-arg)))
+  (unless (org-at-table-p)
+    (user-error "No table at point"))
+  (if (= 4 arg)
+      (let* ((note (plist-get (jackel-row-to-lisp) 'notes))
+             (parts (string-split note ";" nil " *")))
+        (jackel-put-row 'notes
+                      (string-join
+                       (seq-remove
+                        (lambda (part)
+                          (seq-find (lambda (label)
+                                      (string= label part))
+                                    jackel-set-labels))
+                        parts)
+                       "; ")))
+    (let* ((label (completing-read "Lablel: " (cons "REMOVE" jackel-set-labels) nil t))
+           (note (plist-get (jackel-row-to-lisp) 'notes))
+           (parts (string-split note ";" nil " *"))
+           (no-append nil)
+           (replaced (string-join (seq-map
+                                   (lambda (part)
+                                     (if (seq-find (lambda (label)
+                                                     (string= label part))
+                                                   jackel-set-labels)
+                                         (progn
+                                           (setq no-append t)
+                                           label)
+                                       part))
+                                   parts)
+                                  "; ")))
+      (cond
+       ((equal label "REMOVE")
+        (jackel-workout-set-type 4))
+       (no-append
+        (jackel-put-row 'notes replaced))
+       (t
+        (jackel-put-row 'notes (concat note "; " label)))))))`
 (defun jackel-workout-remove-exercise ()
   "Delete the current exercise in workout."
   (interactive)
@@ -1521,7 +1530,7 @@ SECONDS after now."
                         (save-restriction
                           (goto-char (point-min))
                           (search-forward-regexp "^|")
-                          (org-table-to-lisp))))
+                          (jackel-table-to-lisp))))
              (buf (get-buffer-create (format "*Exercise: %s*" exercise-name))))
         (with-current-buffer buf
           (erase-buffer)
@@ -1561,9 +1570,6 @@ SECONDS after now."
                             best-1rm-date
                             (jackel--value-to-string (car best-1rm-row))
                             (cadr best-1rm-row))))
-
-          (insert (format "Current 1RM: %s" (jackel--value-to-string (jackel--table-1rm current))))
-
           (special-mode)
           (visual-line-mode 1))
         (display-buffer buf)))))
@@ -1769,7 +1775,7 @@ This overlay is normally placed at the end of an exercie's table.")
   (when (org-at-table-p)
     (let* ((exercise-name (org-get-heading t t t t))
            (last-exercise (cadr (jackel--scan-past-workout-exercises exercise-name)))
-           (current-data (org-table-to-lisp))
+           (current-data (jackel-table-to-lisp))
            (volume (jackel--table-volume current-data))
            (1rm (jackel--table-1rm current-data))
            (best-set-volume (jackel--table-best-set-volume current-data))
